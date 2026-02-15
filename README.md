@@ -1,8 +1,5 @@
 # Quorum CLI - Distributed Storage Platform
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-10%2F10-passing-green)](https://github.com/joshuabvarghese/Quorum-CLI)
-[![Demo](https://img.shields.io/badge/demo-working-brightgreen)](./scripts/demo.sh)
 
 A production-grade command-line tool suite for managing distributed storage systems, data replication, and cluster operations - built entirely with Linux CLI tools.
 
