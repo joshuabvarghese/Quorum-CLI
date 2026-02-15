@@ -1,5 +1,8 @@
 # Quorum CLI - Distributed Storage Platform
-
+![Bash](https://img.shields.io/badge/language-Bash-blue)
+![Linux](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-yellow)
+![Distributed Systems](https://img.shields.io/badge/domain-Distributed%20Systems-green)
+![Chaos Engineering](https://img.shields.io/badge/practice-Chaos%20Engineering-red)
 
 A production-grade command-line tool suite for managing distributed storage systems, data replication, and cluster operations - built entirely with Linux CLI tools.
 
