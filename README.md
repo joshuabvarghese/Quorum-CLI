@@ -16,6 +16,49 @@ This project simulates a distributed storage platform with:
 - **Cluster health monitoring and auto-remediation** (leader election, failover)
 - **Network partition detection and handling** (chaos engineering)
 
+
+# Quorum CLI - System Architecture
+
+```mermaid
+graph TB
+    subgraph "User Interface"
+        CLI[CLI Tools]
+    end
+
+    subgraph "Control Plane"
+        CM[Cluster Manager]
+        SO[Storage Ops]
+        PM[Performance Monitor]
+    end
+
+    subgraph "Data Plane"
+        subgraph "Cluster"
+            N1[Leader]
+            N2[Follower]
+            N3[Follower]
+        end
+        
+        subgraph "Storage"
+            V1[(Volume)]
+            SNAP[(Snapshots)]
+        end
+    end
+
+    CLI --> CM
+    CLI --> SO
+    CLI --> PM
+    
+    CM --> N1
+    SO --> V1
+    V1 --> SNAP
+    
+    N1 --> N2
+    N1 --> N3
+
+    style CLI fill:#4A90E2,stroke:#333,color:#fff
+    style CM fill:#50C878,stroke:#333,color:#fff
+    style N1 fill:#FF6B6B,stroke:#333,color:#fff
+```
 ## 📋 Live Demo Results
 
 ### Cluster Status
