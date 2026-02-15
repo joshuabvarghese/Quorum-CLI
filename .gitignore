@@ -1,0 +1,30 @@
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+tmp/
+*.tmp
+*.temp
+
+# Data directories (keep structure but ignore contents)
+data/clusters/*
+data/volumes/*
+data/snapshots/*
+!data/clusters/.gitkeep
+!data/volumes/.gitkeep
+!data/snapshots/.gitkeep
+
+# Config files with secrets
+config/*.conf
+!config/cluster.conf
