@@ -16,6 +16,10 @@ This project simulates a distributed storage platform with:
 - **Cluster health monitoring and auto-remediation** (leader election, failover)
 - **Network partition detection and handling** (chaos engineering)
 
+## 📊 Demo
+
+[Demo Walkthrough](./Demo.md)
+
 
 # Quorum CLI - System Architecture
 
