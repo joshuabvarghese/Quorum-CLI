@@ -482,3 +482,65 @@ Demo completed successfully!
 
 ---
 
+
+---
+
+## New Features Demo
+
+### Dry-Run Mode
+```
+>>> Previewing a cluster create without making changes...
+
+Command: ./bin/cluster-manager.sh create --name prod --nodes 5 --dry-run
+
+[WARN ] 🔍 DRY-RUN mode enabled — no changes will be made.
+  [DRY-RUN] Would execute: Create cluster directory structure
+            Command: mkdir -p /data/clusters/cls-xxx/{nodes,metadata,state}
+  [DRY-RUN] Would execute: Write cluster metadata
+  [DRY-RUN] Would execute: Create node-1 directories
+  [DRY-RUN] Would execute: Create node-2 directories
+  ...
+```
+
+### Force Quorum / Witness Node
+```
+>>> Creating a 2-node cluster with witness tie-breaker...
+
+Command: ./bin/cluster-manager.sh create --name two-node --nodes 2 --force-quorum
+
+[WARN ] Even node count (2) detected — quorum is not guaranteed on split.
+[INFO ] 🗳️  --force-quorum: spinning up Witness node as tie-breaker (+1 vote, no data).
+[INFO ] Provisioning 2 data nodes...
+[INFO ] 🗳️  Creating Witness node (witness-3, vote-only, no data storage)
+[SUCCESS] Cluster created successfully!
+
+Nodes: 2 + 1 witness (quorum tie-breaker)
+```
+
+### iptables Network Partition
+```
+>>> Partitioning node 192.168.1.102 from cluster via iptables...
+
+Command: ./scripts/chaos-engineering.sh partition --target-node 192.168.1.102
+
+[WARN ] 🚨 Partitioning 192.168.1.102 from the cluster...
+[INFO ] Cluster IPs in scope: 192.168.1.0/24
+  ssh 192.168.1.102 "sudo iptables -A INPUT  -s 192.168.1.0/24 -j DROP"
+  ssh 192.168.1.102 "sudo iptables -A OUTPUT -d 192.168.1.0/24 -j DROP"
+
+[WARN ] Node 192.168.1.102 is now ISOLATED from the cluster.
+
+  What happens next (quorum math):
+    • Remaining nodes form majority → keep accepting writes
+    • Partitioned node (192.168.1.102) detects heartbeat loss → enters read-only mode
+    • Leader re-election is triggered in the majority partition
+```
+
+### JSON Structured Logging
+```bash
+$ tail -f logs/cluster/cluster-manager.json.log
+{"timestamp":"2026-02-22T10:00:01Z","level":"INFO ","message":"Initializing cluster management system..."}
+{"timestamp":"2026-02-22T10:00:01Z","level":"INFO ","message":"Created default cluster configuration"}
+{"timestamp":"2026-02-22T10:00:01Z","level":"SUCCESS","message":"System initialized successfully"}
+{"timestamp":"2026-02-22T10:00:05Z","level":"INFO ","message":"Creating cluster: prod-cluster"}
+```
