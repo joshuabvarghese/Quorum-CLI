@@ -1,0 +1,65 @@
+═══════════════════════════════════════════════════════════════
+        PERFORMANCE REPORT - cls-XXXXXXXXXX
+═══════════════════════════════════════════════════════════════
+
+Generated: 2026-02-15 18:19:30
+
+EXECUTIVE SUMMARY
+───────────────────────────────────────────────────────────────
+Time Period: Last 24 hours
+Cluster Status: HEALTHY
+Average Load: 42%
+Peak Load: 78%
+
+PERFORMANCE METRICS
+───────────────────────────────────────────────────────────────
+
+CPU Utilization:
+  Average: 42.5%
+  Peak:    78.2%
+  Min:     18.7%
+
+Memory Usage:
+  Average: 55.3%
+  Peak:    82.1%
+  Min:     35.4%
+
+Disk I/O:
+  Avg Read IOPS:   1,245
+  Avg Write IOPS:    892
+  Peak Read IOPS:  2,543
+  Peak Write IOPS: 1,876
+
+Network:
+  Avg RX: 45.2 MB/s
+  Avg TX: 38.7 MB/s
+  Peak RX: 89.3 MB/s
+  Peak TX: 76.5 MB/s
+
+Latency (milliseconds):
+  Read Latency:
+    p50:  8 ms
+    p95: 15 ms
+    p99: 23 ms
+  Write Latency:
+    p50: 12 ms
+    p95: 22 ms
+    p99: 35 ms
+
+Throughput:
+  Average: 3,456 ops/sec
+  Peak:    6,789 ops/sec
+
+RECOMMENDATIONS
+───────────────────────────────────────────────────────────────
+1. CPU usage is within normal range
+2. Consider adding nodes if sustained load > 70%
+3. Memory usage healthy, no action needed
+4. Disk I/O performance optimal
+5. Network utilization normal
+
+ALERTS
+───────────────────────────────────────────────────────────────
+• No critical alerts in the last 24 hours
+• 2 warnings: High CPU during peak hours
+
