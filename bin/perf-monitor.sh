@@ -1,10 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 ################################################################################
 # Performance Monitor - Real-time cluster performance monitoring
 ################################################################################
 
 set -euo pipefail
+IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -16,6 +17,9 @@ source "$LIB_DIR/logger.sh"
 
 METRICS_DIR="$DATA_DIR/metrics"
 LOG_FILE="$LOG_DIR/perf-monitor.log"
+
+# Dry-run flag
+DRY_RUN=false
 
 ################################################################################
 # Functions
@@ -356,6 +360,11 @@ main() {
             --output)
                 output_file="$2"
                 shift 2
+                ;;
+            --dry-run)
+                DRY_RUN=true
+                log_warn "🔍 DRY-RUN mode enabled — no changes will be made."
+                shift
                 ;;
             --help)
                 show_usage

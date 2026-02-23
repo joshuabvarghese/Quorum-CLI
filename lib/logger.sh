@@ -1,8 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 ################################################################################
 # Logger Library - Consistent logging across all scripts
+# Includes JSON structured logging for ELK/Grafana Loki/Elasticsearch pipelines
 ################################################################################
+
+set -euo pipefail
+IFS=$'\n\t'
 
 # Colors
 readonly COLOR_RESET='\033[0m'
@@ -26,8 +30,29 @@ LOG_LEVEL=${LOG_LEVEL:-$LOG_LEVEL_INFO}
 # Log file (can be overridden)
 LOG_FILE=${LOG_FILE:-"/tmp/cluster-manager.log"}
 
+# JSON log file — separate stream for machine-readable output
+JSON_LOG_FILE=${JSON_LOG_FILE:-"/tmp/cluster-manager.json.log"}
+
 ################################################################################
-# Logging functions
+# Structured JSON logging — compatible with ELK / Grafana Loki
+#
+# Usage:   log_json "INFO" "Quorum achieved with 3/5 nodes"
+# Output:  {"timestamp":"2026-02-22T10:00:00Z","level":"INFO","message":"..."}
+#
+# Pipe to Elasticsearch:
+#   ./bin/cluster-manager.sh status 2>&1 | tee >(cat >&2) >> cluster.json.log
+################################################################################
+log_json() {
+    local level="${1:-INFO}"
+    local msg="${2:-}"
+    printf '{"timestamp":"%s","level":"%s","message":"%s"}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        "$level" \
+        "$msg" >> "${JSON_LOG_FILE}"
+}
+
+################################################################################
+# Human-readable logging functions
 ################################################################################
 
 _log() {
@@ -36,43 +61,28 @@ _log() {
     local color="$3"
     shift 3
     local message="$*"
-    
-    # Check if we should log this level
+
     if [[ $level_num -lt $LOG_LEVEL ]]; then
         return
     fi
-    
+
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
-    # Console output with color
+
     echo -e "${color}[${level}]${COLOR_RESET} ${message}" >&2
-    
-    # File output without color
-    if [[ -n "$LOG_FILE" ]]; then
+
+    if [[ -n "${LOG_FILE:-}" ]]; then
         echo "[${timestamp}] [${level}] ${message}" >> "$LOG_FILE"
     fi
+
+    log_json "${level}" "${message}"
 }
 
-log_debug() {
-    _log "DEBUG" "$LOG_LEVEL_DEBUG" "$COLOR_CYAN" "$@"
-}
-
-log_info() {
-    _log "INFO " "$LOG_LEVEL_INFO" "$COLOR_BLUE" "$@"
-}
-
-log_warn() {
-    _log "WARN " "$LOG_LEVEL_WARN" "$COLOR_YELLOW" "$@"
-}
-
-log_error() {
-    _log "ERROR" "$LOG_LEVEL_ERROR" "$COLOR_RED" "$@"
-}
-
-log_success() {
-    _log "SUCCESS" "$LOG_LEVEL_INFO" "$COLOR_GREEN" "$@"
-}
+log_debug()   { _log "DEBUG"   "$LOG_LEVEL_DEBUG" "$COLOR_CYAN"    "$@"; }
+log_info()    { _log "INFO "   "$LOG_LEVEL_INFO"  "$COLOR_BLUE"    "$@"; }
+log_warn()    { _log "WARN "   "$LOG_LEVEL_WARN"  "$COLOR_YELLOW"  "$@"; }
+log_error()   { _log "ERROR"   "$LOG_LEVEL_ERROR" "$COLOR_RED"     "$@"; }
+log_success() { _log "SUCCESS" "$LOG_LEVEL_INFO"  "$COLOR_GREEN"   "$@"; }
 
 ################################################################################
 # Progress indicators
@@ -82,7 +92,6 @@ show_spinner() {
     local pid=$1
     local message="${2:-Processing}"
     local spinstr='|/-\'
-    
     while kill -0 "$pid" 2>/dev/null; do
         local temp=${spinstr#?}
         printf "\r[%c] %s" "$spinstr" "$message"
@@ -96,23 +105,18 @@ show_progress_bar() {
     local current=$1
     local total=$2
     local width=50
-    
     local percentage=$((current * 100 / total))
     local filled=$((current * width / total))
     local empty=$((width - filled))
-    
     printf "\r["
     printf "%${filled}s" | tr ' ' '='
     printf "%${empty}s" | tr ' ' ' '
     printf "] %d%%" "$percentage"
-    
-    if [[ $current -eq $total ]]; then
-        echo ""
-    fi
+    if [[ $current -eq $total ]]; then echo ""; fi
 }
 
 ################################################################################
-# Helper functions
+# Section helpers
 ################################################################################
 
 log_section() {
@@ -128,7 +132,5 @@ log_separator() {
     echo "───────────────────────────────────────────────────────────────"
 }
 
-# Export functions
-export -f log_debug log_info log_warn log_error log_success
-export -f show_spinner show_progress_bar
-export -f log_section log_separator
+export -f log_debug log_info log_warn log_error log_success log_json
+export -f show_spinner show_progress_bar log_section log_separator
