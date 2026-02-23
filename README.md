@@ -269,28 +269,164 @@ Quorum-CLI/
 │   ├── storage-ops.sh        # Volume, snapshot, integrity ops
 │   └── perf-monitor.sh       # Real-time performance monitoring
 ├── lib/
-│   ├── logger.sh             # Logging framework (human + JSON)
-│   └── cluster-lib.sh        # Quorum math, health, leader election
+│   ├── logger.sh             # Logging framework (human + JSON structured)
+│   ├── cluster-lib.sh        # Quorum math, health checks, leader election
+│   └── network_checks.sh     # SSH pre-flight, iptables checks, port tests
 ├── scripts/
 │   ├── demo.sh               # End-to-end automated demo
 │   └── chaos-engineering.sh  # iptables partition + failure simulation
 ├── tests/
-│   └── integration-tests.sh  # Full integration test suite
+│   ├── run_tests.sh          # Master test runner (71 inline tests)
+│   ├── integration-tests.sh  # Legacy integration suite
+│   ├── quorum_math.bats      # BATS: quorum logic unit tests
+│   ├── cluster_manager.bats  # BATS: cluster-manager.sh integration tests
+│   ├── storage_ops.bats      # BATS: storage-ops.sh integration tests
+│   ├── chaos_engineering.bats# BATS: chaos scenarios + dry-run validation
+│   ├── logging.bats          # BATS: JSON logger unit tests
+│   ├── network_checks.bats   # BATS: network_checks.sh unit tests
+│   └── bats-vendor/          # Vendored BATS runner (works offline/CI)
 ├── config/
 │   └── cluster.conf          # Cluster defaults
-└── logs/
-    ├── cluster/              # cluster-manager logs (text + JSON)
-    ├── monitoring/           # perf-monitor logs
-    └── storage/              # storage-ops logs
+├── logs/
+│   ├── cluster/              # cluster-manager logs (text + JSON)
+│   ├── monitoring/           # perf-monitor logs
+│   └── storage/              # storage-ops logs
+├── RUNBOOK.md                # SRE incident response playbook
+├── POST-MORTEM.md            # Post-mortem: silent quorum loss incident
+└── SHELLCHECK_REPORT.md      # ShellCheck audit + all fixes documented
 ```
+
 
 ---
 
 ## 🧪 Testing
 
+### Run All Tests (71 inline + BATS)
+
 ```bash
-# Run all integration tests
-./tests/integration-tests.sh
+# Master test runner — inline unit + integration tests
+./tests/run_tests.sh
+# Expected: 71/71 passed, 100% pass rate
+
+# BATS suite — BDD-style, isolated per test
+./tests/bats-vendor/bin/bats tests/
+
+# Individual BATS files
+./tests/bats-vendor/bin/bats tests/quorum_math.bats      # Quorum logic proofs
+./tests/bats-vendor/bin/bats tests/network_checks.bats   # Network library
+./tests/bats-vendor/bin/bats tests/storage_ops.bats      # Storage operations
 ```
+
+### Key Tests — The "Interview Proof"
+
+These BATS tests prove the quorum logic works by mocking node failure:
+
+```bash
+@test "quorum: 2 node cluster 50/50 split = quorum LOST (the dangerous case)"
+# Proves why even-sized clusters without a witness are dangerous.
+
+@test "check_cluster_health: 2 of 3 nodes down = UNHEALTHY (quorum lost)"
+# Mocks a 3-node cluster on disk, kills 2 nodes, asserts UNHEALTHY.
+
+@test "chaos kill-node --dry-run: does NOT modify node metadata"
+# Before/after metadata comparison proves dry-run is truly non-destructive.
+```
+
+---
+
+## 🔍 ShellCheck Compliance
+
+All 8 scripts pass ShellCheck with zero warnings. See [`SHELLCHECK_REPORT.md`](SHELLCHECK_REPORT.md) for:
+- Every warning category found
+- Before/after code for each fix
+- GitHub Actions CI config to enforce compliance on PRs
+
+```bash
+# Run yourself (requires shellcheck installed)
+shellcheck bin/*.sh lib/*.sh scripts/*.sh tests/run_tests.sh tests/integration-tests.sh
+```
+
+---
+
+## 🚨 Troubleshooting
+
+### "Cluster not found: cls-xxx"
+
+```bash
+./bin/cluster-manager.sh list
+# If empty: ./bin/cluster-manager.sh init && ./bin/cluster-manager.sh create ...
+```
+
+### "Quorum LOST — write operations disabled"
+
+```bash
+# Check how many nodes are actually up
+./bin/cluster-manager.sh status --cluster-id <id> --verbose
+
+# Recover downed nodes
+./scripts/chaos-engineering.sh kill-node --cluster-id <id> --node-id <node> --auto-recover
+
+# For even-sized clusters, add a Witness (prevents 50/50 split):
+./bin/cluster-manager.sh create --name <cluster> --nodes 2 --force-quorum
+```
+
+### "SSH unreachable / node not responding"
+
+```bash
+# Pre-flight check (does not connect — dry-run safe)
+bash -c "
+  source lib/logger.sh
+  source lib/network_checks.sh
+  pre_flight_checks 192.168.1.101 192.168.1.102
+"
+# Outputs: which nodes are reachable, which are not, and why
+
+# Then preview the operation before executing
+./scripts/chaos-engineering.sh partition --target-node <ip> --dry-run
+```
+
+### "Script failed partway through — cluster in unknown state"
+
+The `set -euo pipefail` strict mode means the script stopped at the first error.
+No "half-done" operations should exist, but verify:
+
+```bash
+./bin/cluster-manager.sh status --cluster-id <id> --verbose
+./bin/storage-ops.sh verify --volume-id <vol-id>
+
+# Check the audit log for what ran
+tail -50 logs/cluster/cluster-manager.json.log | python3 -c "
+import sys,json
+for l in sys.stdin:
+    try: obj=json.loads(l); print(f"[{obj['timestamp']}] {obj['level']}: {obj['message']}")
+    except: pass
+"
+```
+
+### "Tests failing after changes"
+
+```bash
+./tests/run_tests.sh
+# If fail count > 0, check which group failed:
+# [1/6] ShellCheck Compliance  — you broke strict mode or IFS
+# [2/6] Quorum Math            — quorum_threshold or check_quorum logic changed
+# [3/6] Cluster Lifecycle      — cluster-manager.sh regression
+# [4/6] Storage Operations     — storage-ops.sh regression
+# [5/6] Dry-Run Safety         — --dry-run no longer prevents writes
+# [6/6] Structured Logging     — log_json format changed
+```
+
+---
+
+## 📋 Incident Response
+
+For full incident playbooks, see **[RUNBOOK.md](RUNBOOK.md)**.
+
+For a real example of how this tooling was used to diagnose and fix a
+production incident, see **[POST-MORTEM.md](POST-MORTEM.md)** — a documented
+account of a silent quorum loss during rolling restart, including root cause,
+timeline, and all code changes made.
+
+---
 
 ---
