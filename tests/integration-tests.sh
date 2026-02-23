@@ -1,10 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 ################################################################################
 # Integration Tests - Test suite for distributed storage platform
 ################################################################################
 
 set -euo pipefail
+IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -21,12 +22,12 @@ TESTS_FAILED=0
 
 test_passed() {
     ((TESTS_PASSED++))
-    echo "$(tput setaf 2)✓ PASS$(tput sgr0): $1"
+    echo "$(tput setaf 2 2>/dev/null || true)✓ PASS$(tput sgr0 2>/dev/null || true): $1"
 }
 
 test_failed() {
     ((TESTS_FAILED++))
-    echo "$(tput setaf 1)✗ FAIL$(tput sgr0): $1"
+    echo "$(tput setaf 1 2>/dev/null || true)✗ FAIL$(tput sgr0 2>/dev/null || true): $1"
 }
 
 run_test() {
@@ -35,7 +36,7 @@ run_test() {
     shift
     
     echo ""
-    echo "$(tput bold)Running: $test_name$(tput sgr0)"
+    echo "$(tput bold 2>/dev/null || true)Running: $test_name$(tput sgr0 2>/dev/null || true)"
     echo "────────────────────────────────────────────────────────────────"
     
     if "$@"; then
@@ -177,22 +178,22 @@ test_performance_analysis() {
 
 print_header() {
     echo ""
-    echo "$(tput bold)╔════════════════════════════════════════════════════════════════╗$(tput sgr0)"
-    echo "$(tput bold)║         INTEGRATION TEST SUITE - Distributed Storage          ║$(tput sgr0)"
-    echo "$(tput bold)╚════════════════════════════════════════════════════════════════╝$(tput sgr0)"
+    echo "$(tput bold 2>/dev/null || true)╔════════════════════════════════════════════════════════════════╗$(tput sgr0 2>/dev/null || true)"
+    echo "$(tput bold 2>/dev/null || true)║         INTEGRATION TEST SUITE - Distributed Storage          ║$(tput sgr0 2>/dev/null || true)"
+    echo "$(tput bold 2>/dev/null || true)╚════════════════════════════════════════════════════════════════╝$(tput sgr0 2>/dev/null || true)"
     echo ""
 }
 
 print_summary() {
     echo ""
-    echo "$(tput bold)═══════════════════════════════════════════════════════════════$(tput sgr0)"
-    echo "$(tput bold)                       TEST SUMMARY                              $(tput sgr0)"
-    echo "$(tput bold)═══════════════════════════════════════════════════════════════$(tput sgr0)"
+    echo "$(tput bold 2>/dev/null || true)═══════════════════════════════════════════════════════════════$(tput sgr0 2>/dev/null || true)"
+    echo "$(tput bold 2>/dev/null || true)                       TEST SUMMARY                              $(tput sgr0 2>/dev/null || true)"
+    echo "$(tput bold 2>/dev/null || true)═══════════════════════════════════════════════════════════════$(tput sgr0 2>/dev/null || true)"
     echo ""
     
     printf "%-20s %d\n" "Tests Run:" "$TESTS_RUN"
-    printf "%-20s $(tput setaf 2)%d$(tput sgr0)\n" "Tests Passed:" "$TESTS_PASSED"
-    printf "%-20s $(tput setaf 1)%d$(tput sgr0)\n" "Tests Failed:" "$TESTS_FAILED"
+    printf "%-20s $(tput setaf 2 2>/dev/null || true)%d$(tput sgr0 2>/dev/null || true)\n" "Tests Passed:" "$TESTS_PASSED"
+    printf "%-20s $(tput setaf 1 2>/dev/null || true)%d$(tput sgr0 2>/dev/null || true)\n" "Tests Failed:" "$TESTS_FAILED"
     
     local success_rate=0
     if [[ $TESTS_RUN -gt 0 ]]; then
@@ -203,9 +204,9 @@ print_summary() {
     echo ""
     
     if [[ $TESTS_FAILED -eq 0 ]]; then
-        echo "$(tput setaf 2)$(tput bold)ALL TESTS PASSED!$(tput sgr0)"
+        echo "$(tput setaf 2 2>/dev/null || true)$(tput bold 2>/dev/null || true)ALL TESTS PASSED!$(tput sgr0 2>/dev/null || true)"
     else
-        echo "$(tput setaf 1)$(tput bold)SOME TESTS FAILED$(tput sgr0)"
+        echo "$(tput setaf 1 2>/dev/null || true)$(tput bold 2>/dev/null || true)SOME TESTS FAILED$(tput sgr0 2>/dev/null || true)"
     fi
     echo ""
 }
