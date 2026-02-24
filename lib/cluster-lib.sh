@@ -66,6 +66,68 @@ validate_replication_factor() {
 }
 
 ################################################################################
+# Quorum math functions
+# Quorum = floor(N/2) + 1  (strict majority — same formula as Cassandra/Raft)
+################################################################################
+
+# quorum_threshold <total_nodes>
+#   Prints the minimum number of UP nodes required for quorum.
+#   e.g. quorum_threshold 5  → 3
+quorum_threshold() {
+    local total="$1"
+    echo $(( total / 2 + 1 ))
+}
+
+# check_quorum <up_nodes> <total_nodes>
+#   Returns 0 if quorum is held (up_nodes >= threshold), 1 if quorum is lost.
+check_quorum() {
+    local up_nodes="$1"
+    local total_nodes="$2"
+    local threshold
+    threshold=$(quorum_threshold "${total_nodes}")
+
+    if [[ "${up_nodes}" -ge "${threshold}" ]]; then
+        return 0   # Quorum HELD
+    else
+        return 1   # Quorum LOST
+    fi
+}
+
+# count_up_nodes <cluster_id>
+#   Returns the number of nodes currently in status=up.
+count_up_nodes() {
+    local cluster_id="$1"
+    local cluster_dir="${DATA_DIR}/clusters/${cluster_id}"
+    local count=0
+
+    for node_dir in "${cluster_dir}/nodes"/*/; do
+        [[ -d "$node_dir" ]] || continue
+        local status
+        status=$(grep -o '"status"[: ]*"[^"]*"' "${node_dir}/metadata.json" \
+                 | grep -o '"[^"]*"$' | tr -d '"')
+        [[ "$status" == "up" ]] && (( count++ )) || true
+    done
+
+    echo "$count"
+}
+
+# count_total_nodes <cluster_id>
+#   Returns the total number of node directories present.
+count_total_nodes() {
+    local cluster_id="$1"
+    local cluster_dir="${DATA_DIR}/clusters/${cluster_id}"
+    local count=0
+
+    for node_dir in "${cluster_dir}/nodes"/*/; do
+        [[ -d "$node_dir" ]] && (( count++ )) || true
+    done
+
+    echo "$count"
+}
+
+export -f quorum_threshold check_quorum count_up_nodes count_total_nodes
+
+################################################################################
 # Cluster health functions
 ################################################################################
 
@@ -86,7 +148,7 @@ check_cluster_health() {
             ((total_nodes++))
             
             local status
-            status=$(grep '"status"' "$node_dir/metadata.json" | cut -d'"' -f4)
+            status=$(grep -o '"status"[: ]*"[^"]*"' "$node_dir/metadata.json" | grep -o '"[^"]*"$' | tr -d '"')
             
             if [[ "$status" == "$NODE_STATUS_UP" ]]; then
                 ((up_nodes++))
@@ -181,7 +243,7 @@ elect_leader() {
             node_id=$(basename "$node_dir")
             
             local status
-            status=$(grep '"status"' "$node_dir/metadata.json" | cut -d'"' -f4)
+            status=$(grep -o '"status"[: ]*"[^"]*"' "$node_dir/metadata.json" | grep -o '"[^"]*"$' | tr -d '"')
             
             if [[ "$status" == "$NODE_STATUS_UP" ]]; then
                 up_nodes+=("$node_id")
