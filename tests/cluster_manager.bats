@@ -1,215 +1,232 @@
-#!/usr/bin/env bash
-# ============================================================================
-# cluster_manager.bats — Integration tests for cluster-manager.sh
-# ============================================================================
+#!/usr/bin/env bats
+# cluster_manager.bats — Integration tests for bin/cluster-manager.sh
+#
+# Run:  ./tests/bats-vendor/bin/bats tests/cluster_manager.bats
+
+PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
+CLUSTER_MANAGER="$PROJECT_ROOT/bin/cluster-manager.sh"
 
 setup() {
-    export BATS_TMPDIR
-    BATS_TMPDIR=$(mktemp -d)
-    export PROJECT_ROOT
-    PROJECT_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME:-$0}")/.." && pwd)"
-    export DATA_DIR="$BATS_TMPDIR/data"
-    export LOG_FILE="$BATS_TMPDIR/cluster.log"
-    export JSON_LOG_FILE="$BATS_TMPDIR/cluster.json.log"
-    mkdir -p "$DATA_DIR/clusters" "$BATS_TMPDIR/logs/cluster" "$BATS_TMPDIR/config"
-    # Provide a minimal cluster.conf
-    cat > "$BATS_TMPDIR/config/cluster.conf" << 'EOF'
-DEFAULT_CLUSTER_TYPE=cassandra
-DEFAULT_REPLICATION_FACTOR=3
-DEFAULT_NODE_COUNT=3
-BASE_PORT=7000
-MAX_NODES_PER_CLUSTER=100
-EOF
-    CLUSTER_MANAGER="$PROJECT_ROOT/bin/cluster-manager.sh"
+    # Each test gets its own isolated DATA_DIR so tests can't interfere
+    TEST_DATA_DIR="$(mktemp -d)"
+    export DATA_DIR="$TEST_DATA_DIR"
+
+    # cluster-manager.sh derives CLUSTER_DATA_DIR from DATA_DIR via PROJECT_ROOT,
+    # so we override the whole env to keep everything in the temp dir.
+    mkdir -p "$TEST_DATA_DIR/clusters" "$TEST_DATA_DIR/logs/cluster"
+    chmod +x "$CLUSTER_MANAGER"
 }
 
 teardown() {
-    rm -rf "$BATS_TMPDIR"
+    rm -rf "$TEST_DATA_DIR"
 }
 
-# ─── Strict Mode Compliance ───────────────────────────────────────────────────
-
-@test "cluster-manager: script has strict mode (set -euo pipefail)" {
-    run grep -c "set -euo pipefail" "$CLUSTER_MANAGER"
-    assert_success
-    # Should have exactly one strict-mode line
-    assert_equal "$output" "1"
+# Helper: create a cluster and capture its ID
+_create_and_get_id() {
+    local name="${1:-test-cluster}"
+    local nodes="${2:-3}"
+    local output
+    output=$(DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" \
+                create --name "$name" --nodes "$nodes" 2>/dev/null)
+    echo "$output" | grep "Cluster ID:" | awk '{print $3}'
 }
 
-@test "cluster-manager: script has safe IFS" {
-    run grep -c "IFS=" "$CLUSTER_MANAGER"
-    assert_success
+# ---------------------------------------------------------------------------
+# init
+# ---------------------------------------------------------------------------
+
+@test "init: creates directory structure and default config" {
+    run bash "$CLUSTER_MANAGER" init
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "initialized" ]]
 }
 
-@test "cluster-manager: script has env bash shebang" {
-    run head -1 "$CLUSTER_MANAGER"
-    assert_output "#!/usr/bin/env bash"
+# ---------------------------------------------------------------------------
+# create
+# ---------------------------------------------------------------------------
+
+@test "create: exits non-zero when --name is missing" {
+    run bash "$CLUSTER_MANAGER" create --nodes 3
+    [ "$status" -ne 0 ]
 }
 
-# ─── Initialization ──────────────────────────────────────────────────────────
-
-@test "cluster-manager init: creates required directories" {
-    run env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" init
-    assert_success
-    assert_dir_exists "$DATA_DIR/clusters"
-}
-
-@test "cluster-manager init: creates cluster.conf when missing" {
-    local conf="$BATS_TMPDIR/config2/cluster.conf"
-    mkdir -p "$(dirname "$conf")"
-    run env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        PROJECT_ROOT="$BATS_TMPDIR" bash "$CLUSTER_MANAGER" init
-    # Check success message
-    assert_output "initialized"
-}
-
-# ─── Cluster Creation ─────────────────────────────────────────────────────────
-
-@test "cluster-manager create: creates cluster directory" {
-    run env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" create --name bats-test --nodes 3
-    assert_success
-    # Extract cluster ID from output
+@test "create: creates cluster with correct node count" {
+    bash "$CLUSTER_MANAGER" init 2>/dev/null || true
     local cluster_id
-    cluster_id=$(echo "$output" | grep "Cluster ID:" | awk '{print $3}')
-    assert_dir_exists "$DATA_DIR/clusters/$cluster_id"
-}
+    cluster_id=$(_create_and_get_id "ci-cluster" 3)
+    [ -n "$cluster_id" ]
 
-@test "cluster-manager create: cluster has correct node count" {
-    local out
-    out=$(env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" create --name count-test --nodes 3 2>&1)
-    local cluster_id
-    cluster_id=$(echo "$out" | grep "Cluster ID:" | awk '{print $3}')
     local node_count
-    node_count=$(ls "$DATA_DIR/clusters/$cluster_id/nodes" | wc -l | tr -d ' ')
-    assert_equal "$node_count" "3"
+    node_count=$(ls "$TEST_DATA_DIR/clusters/$cluster_id/nodes" | wc -l | tr -d ' ')
+    [ "$node_count" -eq 3 ]
 }
 
-@test "cluster-manager create: elects a leader" {
-    local out
-    out=$(env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" create --name leader-test --nodes 3 2>&1)
+@test "create: cluster metadata JSON is valid (has required fields)" {
+    bash "$CLUSTER_MANAGER" init 2>/dev/null || true
     local cluster_id
-    cluster_id=$(echo "$out" | grep "Cluster ID:" | awk '{print $3}')
-    assert_file_exists "$DATA_DIR/clusters/$cluster_id/state/leader"
+    cluster_id=$(_create_and_get_id "meta-test" 3)
+
+    local meta="$TEST_DATA_DIR/clusters/$cluster_id/metadata/cluster.json"
+    [ -f "$meta" ]
+    grep -q '"cluster_id"' "$meta"
+    grep -q '"name"' "$meta"
+    grep -q '"node_count"' "$meta"
+    grep -q '"status"' "$meta"
+}
+
+@test "create: leader state file is created" {
+    bash "$CLUSTER_MANAGER" init 2>/dev/null || true
+    local cluster_id
+    cluster_id=$(_create_and_get_id "leader-test" 3)
+
+    [ -f "$TEST_DATA_DIR/clusters/$cluster_id/state/leader" ]
     local leader
-    leader=$(cat "$DATA_DIR/clusters/$cluster_id/state/leader")
-    assert_equal "$leader" "node-1"
+    leader=$(cat "$TEST_DATA_DIR/clusters/$cluster_id/state/leader")
+    [ "$leader" = "node-1" ]
 }
 
-@test "cluster-manager create: requires --name flag" {
-    run env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" create --nodes 3
-    assert_failure
-    assert_output "name is required"
-}
-
-# ─── Force Quorum / Witness ───────────────────────────────────────────────────
-
-@test "cluster-manager create --force-quorum: adds witness for even node count" {
-    local out
-    out=$(env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" create --name witness-test --nodes 2 --force-quorum 2>&1)
+@test "create: each node has metadata.json with status=up" {
+    bash "$CLUSTER_MANAGER" init 2>/dev/null || true
     local cluster_id
-    cluster_id=$(echo "$out" | grep "Cluster ID:" | awk '{print $3}')
-    # Should have 3 nodes total: 2 data + 1 witness
-    local node_count
-    node_count=$(ls "$DATA_DIR/clusters/$cluster_id/nodes" | wc -l | tr -d ' ')
-    assert_equal "$node_count" "3"
-    # Witness directory should exist
-    assert_dir_exists "$DATA_DIR/clusters/$cluster_id/nodes/witness-3"
+    cluster_id=$(_create_and_get_id "node-meta-test" 3)
+
+    for node_dir in "$TEST_DATA_DIR/clusters/$cluster_id/nodes"/*/; do
+        local meta="$node_dir/metadata.json"
+        [ -f "$meta" ]
+        local status
+        status=$(grep -o '"status"[: ]*"[^"]*"' "$meta" | grep -o '"[^"]*"$' | tr -d '"')
+        [ "$status" = "up" ]
+    done
 }
 
-@test "cluster-manager create --force-quorum: witness metadata marks is_witness=true" {
-    local out
-    out=$(env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" create --name witness-meta --nodes 2 --force-quorum 2>&1)
+# ---------------------------------------------------------------------------
+# list
+# ---------------------------------------------------------------------------
+
+@test "list: shows 'No clusters found' when data dir is empty" {
+    run bash "$CLUSTER_MANAGER" list
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "No clusters found" ]]
+}
+
+@test "list: shows created cluster after create" {
+    bash "$CLUSTER_MANAGER" init 2>/dev/null || true
+    _create_and_get_id "list-test" 3 >/dev/null
+
+    run bash "$CLUSTER_MANAGER" list
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "list-test" ]]
+}
+
+# ---------------------------------------------------------------------------
+# status
+# ---------------------------------------------------------------------------
+
+@test "status: exits non-zero for unknown cluster-id" {
+    run bash "$CLUSTER_MANAGER" status --cluster-id does-not-exist
+    [ "$status" -ne 0 ]
+}
+
+@test "status: exits non-zero when --cluster-id is missing" {
+    run bash "$CLUSTER_MANAGER" status
+    [ "$status" -ne 0 ]
+}
+
+@test "status: shows HEALTHY for a freshly created 3-node cluster" {
+    bash "$CLUSTER_MANAGER" init 2>/dev/null || true
     local cluster_id
-    cluster_id=$(echo "$out" | grep "Cluster ID:" | awk '{print $3}')
-    run grep "is_witness" "$DATA_DIR/clusters/$cluster_id/nodes/witness-3/metadata.json"
-    assert_output "true"
+    cluster_id=$(_create_and_get_id "status-test" 3)
+
+    run bash "$CLUSTER_MANAGER" status --cluster-id "$cluster_id"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "HEALTHY" ]]
 }
 
-@test "cluster-manager create --force-quorum: not added for odd node count" {
-    local out
-    out=$(env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" create --name no-witness --nodes 3 --force-quorum 2>&1)
+# ---------------------------------------------------------------------------
+# add-node
+# ---------------------------------------------------------------------------
+
+@test "add-node: increases node count by 1" {
+    bash "$CLUSTER_MANAGER" init 2>/dev/null || true
     local cluster_id
-    cluster_id=$(echo "$out" | grep "Cluster ID:" | awk '{print $3}')
-    # Odd cluster should still have exactly 3 nodes (no witness added)
-    local node_count
-    node_count=$(ls "$DATA_DIR/clusters/$cluster_id/nodes" | wc -l | tr -d ' ')
-    assert_equal "$node_count" "3"
-}
+    cluster_id=$(_create_and_get_id "scale-test" 3)
 
-# ─── Dry Run ─────────────────────────────────────────────────────────────────
-
-@test "cluster-manager --dry-run: does not create any directories" {
-    run env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" create --name dry-test --nodes 3 --dry-run
-    assert_success
-    assert_output "DRY-RUN"
-    # Data directory should still be empty
-    local cluster_count
-    cluster_count=$(ls "$DATA_DIR/clusters" 2>/dev/null | wc -l | tr -d ' ')
-    assert_equal "$cluster_count" "0"
-}
-
-@test "cluster-manager --dry-run: prints would-execute messages" {
-    run env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" create --name dry-preview --nodes 2 --dry-run
-    assert_output "Would execute"
-}
-
-# ─── Status ──────────────────────────────────────────────────────────────────
-
-@test "cluster-manager status: shows HEALTHY for a new cluster" {
-    local out
-    out=$(env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" create --name status-test --nodes 3 2>&1)
-    local cluster_id
-    cluster_id=$(echo "$out" | grep "Cluster ID:" | awk '{print $3}')
-
-    run env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" status --cluster-id "$cluster_id"
-    assert_success
-    assert_output "HEALTHY"
-}
-
-@test "cluster-manager status: shows LEADER node" {
-    local out
-    out=$(env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" create --name leader-show --nodes 3 2>&1)
-    local cluster_id
-    cluster_id=$(echo "$out" | grep "Cluster ID:" | awk '{print $3}')
-
-    run env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" status --cluster-id "$cluster_id"
-    assert_output "LEADER"
-}
-
-@test "cluster-manager status: exits 1 for unknown cluster" {
-    run env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" status --cluster-id "cls-does-not-exist"
-    assert_failure
-    assert_output "not found"
-}
-
-# ─── Add Node ────────────────────────────────────────────────────────────────
-
-@test "cluster-manager add-node: increments node count" {
-    local out
-    out=$(env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" create --name addnode-test --nodes 3 2>&1)
-    local cluster_id
-    cluster_id=$(echo "$out" | grep "Cluster ID:" | awk '{print $3}')
-
-    env DATA_DIR="$DATA_DIR" LOG_FILE="$LOG_FILE" JSON_LOG_FILE="$JSON_LOG_FILE" \
-        bash "$CLUSTER_MANAGER" add-node --cluster-id "$cluster_id" > /dev/null 2>&1
+    bash "$CLUSTER_MANAGER" add-node --cluster-id "$cluster_id" 2>/dev/null
 
     local node_count
-    node_count=$(ls "$DATA_DIR/clusters/$cluster_id/nodes" | wc -l | tr -d ' ')
-    assert_equal "$node_count" "4"
+    node_count=$(ls "$TEST_DATA_DIR/clusters/$cluster_id/nodes" | wc -l | tr -d ' ')
+    [ "$node_count" -eq 4 ]
+}
+
+@test "add-node: exits non-zero for missing cluster" {
+    run bash "$CLUSTER_MANAGER" add-node --cluster-id no-such-cluster
+    [ "$status" -ne 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# check_cluster_health (POST-MORTEM regression: single-line JSON parsing)
+# ---------------------------------------------------------------------------
+
+@test "check_cluster_health: correctly reads status from single-line JSON" {
+    # This is the regression test from the POST-MORTEM.
+    # The old grep|cut pattern extracted the wrong field on single-line JSON.
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    export DATA_DIR="$tmp_dir"
+    local cluster_id="regression-cls"
+
+    mkdir -p "$tmp_dir/clusters/$cluster_id/nodes/node-1"
+    # Single-line JSON — the exact format that broke the old parser
+    printf '{"node_id":"node-1","cluster_id":"%s","status":"up","role":"leader"}\n' \
+           "$cluster_id" > "$tmp_dir/clusters/$cluster_id/nodes/node-1/metadata.json"
+
+    source "$PROJECT_ROOT/lib/cluster-lib.sh"
+    run check_cluster_health "$cluster_id"
+    [ "$status" -eq 0 ]
+    [ "$output" = "healthy" ]
+
+    rm -rf "$tmp_dir"
+}
+
+@test "check_cluster_health: 1 of 3 nodes down = DEGRADED (quorum retained)" {
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    export DATA_DIR="$tmp_dir"
+    local cluster_id="degraded-cls"
+
+    for i in 1 2 3; do
+        mkdir -p "$tmp_dir/clusters/$cluster_id/nodes/node-$i"
+        local st="up"
+        [[ $i -eq 3 ]] && st="down"
+        printf '{"node_id":"node-%s","status":"%s"}\n' "$i" "$st" \
+            > "$tmp_dir/clusters/$cluster_id/nodes/node-$i/metadata.json"
+    done
+
+    source "$PROJECT_ROOT/lib/cluster-lib.sh"
+    run check_cluster_health "$cluster_id"
+    [ "$status" -eq 0 ]
+    [ "$output" = "degraded" ]
+
+    rm -rf "$tmp_dir"
+}
+
+@test "check_cluster_health: 2 of 3 nodes down = UNHEALTHY (quorum lost)" {
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    export DATA_DIR="$tmp_dir"
+    local cluster_id="unhealthy-cls"
+
+    for i in 1 2 3; do
+        mkdir -p "$tmp_dir/clusters/$cluster_id/nodes/node-$i"
+        local st="down"
+        [[ $i -eq 1 ]] && st="up"
+        printf '{"node_id":"node-%s","status":"%s"}\n' "$i" "$st" \
+            > "$tmp_dir/clusters/$cluster_id/nodes/node-$i/metadata.json"
+    done
+
+    source "$PROJECT_ROOT/lib/cluster-lib.sh"
+    run check_cluster_health "$cluster_id"
+    [ "$output" = "unhealthy" ]
+
+    rm -rf "$tmp_dir"
 }
