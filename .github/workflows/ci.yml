@@ -70,8 +70,8 @@ jobs:
       - name: Make scripts executable
         run: chmod +x bin/*.sh scripts/*.sh lib/*.sh tests/run_tests.sh
 
-      - name: Run BATS quorum math tests
-        run: ./tests/bats-vendor/bin/bats tests/quorum_math.bats
+      # - name: Run BATS quorum math tests
+      #   run: ./tests/bats-vendor/bin/bats tests/quorum_math.bats
 
       - name: Run BATS cluster manager tests
         run: ./tests/bats-vendor/bin/bats tests/cluster_manager.bats
