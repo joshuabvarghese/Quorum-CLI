@@ -1,3 +1,6 @@
+simulate_iptables_partition() {
+    local target_node="$1"
+    local dry_run="${2:-false}"
 #!/usr/bin/env bash
 
 ################################################################################
@@ -511,9 +514,6 @@ tc_latency_heal() {
 }
 
 # Real iptables-based network partition (existing docs reference this)
-simulate_iptables_partition() {
-    local target_node="$1"
-    local dry_run="${2:-false}"
     local ssh_user="${SSH_USER:-$(whoami)}"
 
     log_warn "CHAOS: iptables network partition targeting ${target_node}"
