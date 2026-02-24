@@ -1,11 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 ################################################################################
 # Performance Monitor - Real-time cluster performance monitoring
 ################################################################################
 
 set -euo pipefail
-IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -17,9 +16,6 @@ source "$LIB_DIR/logger.sh"
 
 METRICS_DIR="$DATA_DIR/metrics"
 LOG_FILE="$LOG_DIR/perf-monitor.log"
-
-# Dry-run flag
-DRY_RUN=false
 
 ################################################################################
 # Functions
@@ -361,11 +357,6 @@ main() {
                 output_file="$2"
                 shift 2
                 ;;
-            --dry-run)
-                DRY_RUN=true
-                log_warn "🔍 DRY-RUN mode enabled — no changes will be made."
-                shift
-                ;;
             --help)
                 show_usage
                 ;;
@@ -389,11 +380,134 @@ main() {
             [[ -z "$cluster_id" ]] && { log_error "Cluster ID required"; exit 1; }
             analyze_performance "$cluster_id"
             ;;
+        metrics)
+            emit_prometheus_metrics "$cluster_id"
+            ;;
         *)
             log_error "Unknown command: $command"
             show_usage
             ;;
     esac
+}
+
+################################################################################
+# emit_prometheus_metrics
+#
+# Outputs cluster metrics in Prometheus exposition format so they can be
+# scraped by a Prometheus server or Pushgateway.
+#
+# Example output:
+#   # HELP quorum_nodes_up Number of nodes currently UP
+#   # TYPE quorum_nodes_up gauge
+#   quorum_nodes_up{cluster="cls-001",name="prod"} 3
+#
+# Usage:
+#   ./bin/perf-monitor.sh metrics                   # all clusters
+#   ./bin/perf-monitor.sh metrics --cluster-id cls  # single cluster
+################################################################################
+
+emit_prometheus_metrics() {
+    local filter_cluster="${1:-}"
+    local cluster_data_dir="${DATA_DIR}/clusters"
+
+    if [[ ! -d "$cluster_data_dir" ]] || \
+       [[ -z "$(ls -A "$cluster_data_dir" 2>/dev/null)" ]]; then
+        log_warn "No clusters found under $cluster_data_dir"
+        return 0
+    fi
+
+    # Print HELP/TYPE headers once
+    cat <<'HEADER'
+# HELP quorum_nodes_total Total number of nodes in the cluster
+# TYPE quorum_nodes_total gauge
+# HELP quorum_nodes_up Number of nodes currently UP
+# TYPE quorum_nodes_up gauge
+# HELP quorum_nodes_down Number of nodes currently DOWN
+# TYPE quorum_nodes_down gauge
+# HELP quorum_replication_factor Configured replication factor
+# TYPE quorum_replication_factor gauge
+# HELP quorum_cluster_healthy 1 if cluster status is healthy, 0 otherwise
+# TYPE quorum_cluster_healthy gauge
+# HELP quorum_avg_load_percent Average CPU load across all nodes (percent)
+# TYPE quorum_avg_load_percent gauge
+# HELP quorum_read_latency_ms Simulated p99 read latency in milliseconds
+# TYPE quorum_read_latency_ms gauge
+# HELP quorum_write_latency_ms Simulated p99 write latency in milliseconds
+# TYPE quorum_write_latency_ms gauge
+# HELP quorum_ops_per_second Simulated operations per second
+# TYPE quorum_ops_per_second gauge
+HEADER
+
+    for cluster_dir in "${cluster_data_dir}"/*/; do
+        [[ -d "$cluster_dir" ]] || continue
+        local cluster_id
+        cluster_id=$(basename "$cluster_dir")
+
+        # If a filter was given, skip non-matching clusters
+        if [[ -n "$filter_cluster" && "$cluster_id" != "$filter_cluster" ]]; then
+            continue
+        fi
+
+        local meta_file="${cluster_dir}/metadata/cluster.json"
+        [[ -f "$meta_file" ]] || continue
+
+        # Parse cluster metadata
+        local cluster_name
+        cluster_name=$(grep -o '"name"[: ]*"[^"]*"' "$meta_file" \
+                       | grep -o '"[^"]*"$' | tr -d '"')
+        local cluster_type
+        cluster_type=$(grep -o '"type"[: ]*"[^"]*"' "$meta_file" \
+                       | grep -o '"[^"]*"$' | tr -d '"')
+        local repl_factor
+        repl_factor=$(grep -o '"replication_factor"[: ]*[0-9]*' "$meta_file" \
+                      | awk '{print $NF}')
+        local cluster_status
+        cluster_status=$(grep -o '"status"[: ]*"[^"]*"' "$meta_file" \
+                         | grep -o '"[^"]*"$' | tr -d '"')
+
+        # Count nodes
+        local up=0 down=0 total=0 load_sum=0
+        for node_dir in "${cluster_dir}/nodes"/*/; do
+            [[ -d "$node_dir" ]] || continue
+            (( total++ )) || true
+            local node_meta="${node_dir}/metadata.json"
+            local st
+            st=$(grep -o '"status"[: ]*"[^"]*"' "$node_meta" \
+                 | grep -o '"[^"]*"$' | tr -d '"')
+            local load
+            load=$(grep -o '"load_percent"[: ]*[0-9]*' "$node_meta" \
+                   | awk '{print $NF}')
+            load_sum=$(( load_sum + ${load:-0} ))
+            if [[ "$st" == "up" ]]; then (( up++ )) || true; else (( down++ )); fi
+        done
+
+        local avg_load=0
+        [[ $total -gt 0 ]] && avg_load=$(( load_sum / total ))
+
+        # healthy = 1/0
+        local is_healthy=0
+        [[ "$cluster_status" == "healthy" ]] && is_healthy=1
+
+        # Simulated latency / throughput (in a real deployment, read from a TSDB)
+        local read_lat=$(( RANDOM % 20 + 5 ))
+        local write_lat=$(( RANDOM % 30 + 10 ))
+        local ops=$(( RANDOM % 5000 + 2000 ))
+
+        # Common label set
+        local labels="cluster_id=\"${cluster_id}\",name=\"${cluster_name}\",type=\"${cluster_type}\""
+
+        # Emit metrics
+        printf 'quorum_nodes_total{%s} %d\n'            "$labels" "$total"
+        printf 'quorum_nodes_up{%s} %d\n'               "$labels" "$up"
+        printf 'quorum_nodes_down{%s} %d\n'             "$labels" "$down"
+        printf 'quorum_replication_factor{%s} %d\n'     "$labels" "${repl_factor:-3}"
+        printf 'quorum_cluster_healthy{%s} %d\n'        "$labels" "$is_healthy"
+        printf 'quorum_avg_load_percent{%s} %d\n'       "$labels" "$avg_load"
+        printf 'quorum_read_latency_ms{%s} %d\n'        "$labels" "$read_lat"
+        printf 'quorum_write_latency_ms{%s} %d\n'       "$labels" "$write_lat"
+        printf 'quorum_ops_per_second{%s} %d\n'         "$labels" "$ops"
+        printf '\n'
+    done
 }
 
 main "$@"
