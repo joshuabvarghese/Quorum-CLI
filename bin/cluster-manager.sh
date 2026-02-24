@@ -294,8 +294,11 @@ show_cluster_status() {
 colorize_status() {
     local status="$1"
     case "$status" in
-        up|healthy|running)
-            echo "$(tput setaf 2)${status^^}$(tput sgr0)"
+if [[ "$status" == "up" ]]; then
+    echo "    Status:            UP"
+else
+    echo "    Status:            $status"
+fi
             ;;
         down|unhealthy|failed)
             echo "$(tput setaf 1)${status^^}$(tput sgr0)"
