@@ -6,11 +6,14 @@
 
 set -euo pipefail
 
+# Ensure tput works in non-interactive (CI) environments
+export TERM="${TERM:-dumb}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 LIB_DIR="$PROJECT_ROOT/lib"
-DATA_DIR="$PROJECT_ROOT/data"
-LOG_DIR="$PROJECT_ROOT/logs/monitoring"
+DATA_DIR="${DATA_DIR:-$PROJECT_ROOT/data}"
+LOG_DIR="${LOG_DIR:-$PROJECT_ROOT/logs/monitoring}"
 
 # shellcheck source=lib/logger.sh
 source "$LIB_DIR/logger.sh"
@@ -97,7 +100,8 @@ collect_metrics() {
     ops_per_sec=$(( RANDOM % 5000 + 2000 ))
     
     # Save metrics
-    local metrics_file="$METRICS_DIR/cluster-$cluster_id-$(date +%Y%m%d).json"
+    local metrics_file
+metrics_file="$METRICS_DIR/cluster-$cluster_id-$(date +%Y%m%d).json"
     
     cat >> "$metrics_file" << EOF
 {

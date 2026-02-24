@@ -6,10 +6,13 @@
 
 set -euo pipefail
 
+# Ensure tput works in non-interactive (CI) environments
+export TERM="${TERM:-dumb}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BIN_DIR="$PROJECT_ROOT/bin"
-DATA_DIR="$PROJECT_ROOT/data"
+DATA_DIR="${DATA_DIR:-$PROJECT_ROOT/data}"
 
 # shellcheck source=lib/logger.sh
 source "$PROJECT_ROOT/lib/logger.sh"
@@ -52,6 +55,7 @@ simulate_node_failure() {
     local cluster_id="$1"
     local node_id="$2"
     local auto_recover="${3:-false}"
+    local dry_run="${4:-false}"
     
     log_warn "$(tput setaf 1)CHAOS INITIATED:$(tput sgr0) Killing node $node_id"
     
@@ -60,6 +64,11 @@ simulate_node_failure() {
     if [[ ! -d "$node_dir" ]]; then
         log_error "Node not found: $node_id"
         return 1
+    fi
+    
+    if [[ "$dry_run" == "true" ]]; then
+        log_warn "DRY-RUN: Would kill node $node_id in cluster $cluster_id (no changes made)"
+        return 0
     fi
     
     # Update node status to down
@@ -333,7 +342,7 @@ main() {
         kill-node)
             [[ -z "$cluster_id" ]] && { log_error "Cluster ID required"; exit 1; }
             [[ -z "$node_id" ]] && { log_error "Node ID required"; exit 1; }
-            simulate_node_failure "$cluster_id" "$node_id" "$auto_recover"
+            simulate_node_failure "$cluster_id" "$node_id" "$auto_recover" "$dry_run"
             ;;
         network-partition)
             [[ -z "$cluster_id" ]] && { log_error "Cluster ID required"; exit 1; }

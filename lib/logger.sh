@@ -4,6 +4,10 @@
 # Logger Library - Consistent logging across all scripts
 ################################################################################
 
+# Guard against double-sourcing
+[[ -n "${_LOGGER_SH_SOURCED:-}" ]] && return 0
+readonly _LOGGER_SH_SOURCED=1
+
 # Colors
 readonly COLOR_RESET='\033[0m'
 readonly COLOR_RED='\033[0;31m'

@@ -148,13 +148,13 @@ check_cluster_health() {
     
     for node_dir in "$cluster_dir/nodes"/*; do
         if [[ -d "$node_dir" ]]; then
-            ((total_nodes++))
+            ((total_nodes++)) || true
             
             local status
             status=$(grep -o '"status"[: ]*"[^"]*"' "$node_dir/metadata.json" | grep -o '"[^"]*"$' | tr -d '"')
             
             if [[ "$status" == "$NODE_STATUS_UP" ]]; then
-                ((up_nodes++))
+                ((up_nodes++)) || true
             fi
         fi
     done
@@ -201,7 +201,7 @@ get_cluster_metrics() {
     
     for node_dir in "$cluster_dir/nodes"/*; do
         if [[ -d "$node_dir" ]]; then
-            ((total_nodes++))
+            ((total_nodes++)) || true
             
             local metadata
             metadata=$(cat "$node_dir/metadata.json")
@@ -289,7 +289,7 @@ calculate_replication_status() {
     repl_factor=$(echo "$metadata" | grep -o '"replication_factor": [0-9]*' | awk '{print $2}')
     
     local node_count
-    node_count=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d \' \')
+    node_count=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
     
     if [[ $node_count -ge $repl_factor ]]; then
         echo "synchronized"

@@ -7,13 +7,16 @@
 
 set -euo pipefail
 
+# Ensure tput works in non-interactive (CI) environments
+export TERM="${TERM:-dumb}"
+
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 LIB_DIR="$PROJECT_ROOT/lib"
 CONFIG_DIR="$PROJECT_ROOT/config"
-DATA_DIR="$PROJECT_ROOT/data"
-LOG_DIR="$PROJECT_ROOT/logs/cluster"
+DATA_DIR="${DATA_DIR:-$PROJECT_ROOT/data}"
+LOG_DIR="${LOG_DIR:-$PROJECT_ROOT/logs/cluster}"
 
 # Source libraries
 # shellcheck source=lib/logger.sh
@@ -136,6 +139,7 @@ EOF
     
     log_success "Cluster created successfully!"
     echo ""
+    echo "Cluster created successfully!"
     echo "Cluster ID: $cluster_id"
     echo "Name: $cluster_name"
     echo "Nodes: $node_count"
@@ -397,7 +401,7 @@ add_node_to_cluster() {
     
     local cluster_dir="$CLUSTER_DATA_DIR/$cluster_id"
     local current_nodes
-    current_nodes=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d \' \')
+    current_nodes=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
     local new_node_num
     new_node_num=$((current_nodes + 1))
     
@@ -563,7 +567,7 @@ nodetool_status() {
     cluster_type=$(echo "$meta" | grep -o '"type"[: ]*"[^"]*"' \
                    | grep -o '"[^"]*"$' | tr -d '"')
     local node_count
-    node_count=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d \' \')
+    node_count=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
 
     echo ""
     echo "Note: Cassandra-compatible ring view (modelled after \`nodetool status\`)"

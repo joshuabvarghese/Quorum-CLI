@@ -17,6 +17,9 @@
 ################################################################################
 
 set -euo pipefail
+
+# Ensure tput works in non-interactive (CI) environments
+export TERM="${TERM:-dumb}"
 IFS=$'\n\t'
 
 # Default timeouts (override via env vars)
@@ -151,7 +154,7 @@ pre_flight_checks() {
 
         if [[ "$ssh_ok" == "OK" && "$port_ok" == "OK" ]]; then
             row_status="REACHABLE"
-            (( ok_count++ ))
+            (( ok_count++ )) || true
         elif [[ "$ssh_ok" == "OK" || "$port_ok" == "OK" ]]; then
             row_status="DEGRADED"
         fi
