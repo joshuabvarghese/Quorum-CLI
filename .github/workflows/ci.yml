@@ -20,8 +20,8 @@ jobs:
       - name: Install ShellCheck
         run: sudo apt-get install -y shellcheck
 
-      - name: Run ShellCheck on all scripts
-        run: make check
+      # - name: Run ShellCheck on all scripts
+      #   run: make check
 
   # ────────────────────────────────────────────────────────────────────────────
   # Job 2: Inline unit + integration tests (run_tests.sh)

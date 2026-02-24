@@ -16,12 +16,15 @@ DATA_DIR="$PROJECT_ROOT/data"
 LOG_DIR="$PROJECT_ROOT/logs/cluster"
 
 # Source libraries
+# shellcheck source=lib/logger.sh
 source "$LIB_DIR/logger.sh"
+# shellcheck source=lib/cluster-lib.sh
 source "$LIB_DIR/cluster-lib.sh"
 
 # Global variables
 CLUSTER_DATA_DIR="$DATA_DIR/clusters"
 LOG_FILE="$LOG_DIR/cluster-manager.log"
+export LOG_FILE
 
 ################################################################################
 # Functions
@@ -99,7 +102,8 @@ create_cluster() {
     log_info "Type: $cluster_type, Nodes: $node_count, Replication: $replication_factor"
     
     # Generate cluster ID
-    local cluster_id="cls-$(date +%s)-$(openssl rand -hex 3 2>/dev/null || echo $RANDOM)"
+    local cluster_id
+    cluster_id="cls-$(date +%s)-$(openssl rand -hex 3 2>/dev/null || echo "$RANDOM")"
     local cluster_dir="$CLUSTER_DATA_DIR/$cluster_id"
     
     # Create cluster directory
@@ -187,12 +191,18 @@ show_cluster_status() {
     # Parse cluster metadata
     local metadata
     metadata=$(cat "$cluster_dir/metadata/cluster.json")
-    local name=$(echo "$metadata" | grep -o '"name": "[^"]*"' | cut -d'"' -f4)
-    local type=$(echo "$metadata" | grep -o '"type": "[^"]*"' | cut -d'"' -f4)
-    local created=$(echo "$metadata" | grep -o '"created_at": "[^"]*"' | cut -d'"' -f4)
-    local status=$(echo "$metadata" | grep -o '"status": "[^"]*"' | cut -d'"' -f4)
-    local node_count=$(echo "$metadata" | grep -o '"node_count": [0-9]*' | awk '{print $2}')
-    local repl_factor=$(echo "$metadata" | grep -o '"replication_factor": [0-9]*' | awk '{print $2}')
+    local name
+    name=$(echo "$metadata" | grep -o '"name": "[^"]*"' | cut -d'"' -f4)
+    local type
+    type=$(echo "$metadata" | grep -o '"type": "[^"]*"' | cut -d'"' -f4)
+    local created
+    created=$(echo "$metadata" | grep -o '"created_at": "[^"]*"' | cut -d'"' -f4)
+    local status
+    status=$(echo "$metadata" | grep -o '"status": "[^"]*"' | cut -d'"' -f4)
+    local node_count
+    node_count=$(echo "$metadata" | grep -o '"node_count": [0-9]*' | awk '{print $2}')
+    local repl_factor
+    repl_factor=$(echo "$metadata" | grep -o '"replication_factor": [0-9]*' | awk '{print $2}')
     
     # Display header
     echo ""
@@ -220,14 +230,21 @@ show_cluster_status() {
     
     for node_dir in "$cluster_dir/nodes"/*; do
         if [[ -d "$node_dir" ]]; then
-            local node_id=$(basename "$node_dir")
-            local node_meta=$(cat "$node_dir/metadata.json")
+            local node_id
+            node_id=$(basename "$node_dir")
+            local node_meta
+            node_meta=$(cat "$node_dir/metadata.json")
             
-            local ip=$(echo "$node_meta" | grep -o '"ip": "[^"]*"' | cut -d'"' -f4)
-            local port=$(echo "$node_meta" | grep -o '"port": [0-9]*' | awk '{print $2}')
-            local node_status=$(echo "$node_meta" | grep -o '"status": "[^"]*"' | cut -d'"' -f4)
-            local load=$(echo "$node_meta" | grep -o '"load_percent": [0-9]*' | awk '{print $2}')
-            local data_size=$(echo "$node_meta" | grep -o '"data_size_mb": [0-9]*' | awk '{print $2}')
+            local ip
+            ip=$(echo "$node_meta" | grep -o '"ip": "[^"]*"' | cut -d'"' -f4)
+            local port
+            port=$(echo "$node_meta" | grep -o '"port": [0-9]*' | awk '{print $2}')
+            local node_status
+            node_status=$(echo "$node_meta" | grep -o '"status": "[^"]*"' | cut -d'"' -f4)
+            local load
+            load=$(echo "$node_meta" | grep -o '"load_percent": [0-9]*' | awk '{print $2}')
+            local data_size
+            data_size=$(echo "$node_meta" | grep -o '"data_size_mb": [0-9]*' | awk '{print $2}')
             
             local role="FOLLOWER"
             [[ "$node_id" == "$leader" ]] && role="LEADER"
@@ -240,7 +257,8 @@ show_cluster_status() {
             printf "    %-18s %s MB\n" "Data Size:" "$data_size"
             
             if [[ "$verbose" == "true" ]]; then
-                local uptime=$(calculate_uptime "$node_dir")
+                local uptime
+                uptime=$(calculate_uptime "$node_dir")
                 printf "    %-18s %s\n" "Uptime:" "$uptime"
             fi
         fi
@@ -262,7 +280,8 @@ show_cluster_status() {
     # Storage summary
     echo "$(tput bold)Storage:$(tput sgr0)"
     echo "$(tput bold)───────────────────────────────────────────────────────────────$(tput sgr0)"
-    local total_data=$(( node_count * 1200 ))
+    local total_data
+    total_data=$(( node_count * 1200 ))
     printf "  %-25s %s MB\n" "Total Data:" "$total_data"
     printf "  %-25s %s ops/sec\n" "IOPS:" "$(( RANDOM % 2000 + 500 ))"
     echo ""
@@ -293,12 +312,17 @@ calculate_uptime() {
     
     local start_epoch
     start_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$started_at" "+%s" 2>/dev/null || date -d "$started_at" "+%s" 2>/dev/null || echo 0)
-    local now_epoch=$(date +%s)
-    local diff=$(( now_epoch - start_epoch ))
+    local now_epoch
+    now_epoch=$(date +%s)
+    local diff
+    diff=$(( now_epoch - start_epoch ))
     
-    local days=$(( diff / 86400 ))
-    local hours=$(( (diff % 86400) / 3600 ))
-    local mins=$(( (diff % 3600) / 60 ))
+    local days
+    days=$(( diff / 86400 ))
+    local hours
+    hours=$(( (diff % 86400) / 3600 ))
+    local mins
+    mins=$(( (diff % 3600) / 60 ))
     
     if [[ $days -gt 0 ]]; then
         echo "${days}d ${hours}h ${mins}m"
@@ -325,13 +349,19 @@ list_clusters() {
     
     for cluster_dir in "$CLUSTER_DATA_DIR"/*; do
         if [[ -d "$cluster_dir" ]]; then
-            local cluster_id=$(basename "$cluster_dir")
-            local metadata=$(cat "$cluster_dir/metadata/cluster.json")
+            local cluster_id
+            cluster_id=$(basename "$cluster_dir")
+            local metadata
+            metadata=$(cat "$cluster_dir/metadata/cluster.json")
             
-            local name=$(echo "$metadata" | grep -o '"name": "[^"]*"' | cut -d'"' -f4)
-            local type=$(echo "$metadata" | grep -o '"type": "[^"]*"' | cut -d'"' -f4)
-            local status=$(echo "$metadata" | grep -o '"status": "[^"]*"' | cut -d'"' -f4)
-            local node_count=$(echo "$metadata" | grep -o '"node_count": [0-9]*' | awk '{print $2}')
+            local name
+            name=$(echo "$metadata" | grep -o '"name": "[^"]*"' | cut -d'"' -f4)
+            local type
+            type=$(echo "$metadata" | grep -o '"type": "[^"]*"' | cut -d'"' -f4)
+            local status
+            status=$(echo "$metadata" | grep -o '"status": "[^"]*"' | cut -d'"' -f4)
+            local node_count
+            node_count=$(echo "$metadata" | grep -o '"node_count": [0-9]*' | awk '{print $2}')
             
             printf "%-20s %-25s %-12s %-10s %s\n" \
                 "$cluster_id" "$name" "$type" "$node_count" "$(colorize_status "$status")"
@@ -366,8 +396,10 @@ add_node_to_cluster() {
     fi
     
     local cluster_dir="$CLUSTER_DATA_DIR/$cluster_id"
-    local current_nodes=$(ls -1 "$cluster_dir/nodes" | wc -l | tr -d ' ')
-    local new_node_num=$((current_nodes + 1))
+    local current_nodes
+    current_nodes=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d \' \')
+    local new_node_num
+    new_node_num=$((current_nodes + 1))
     
     log_info "Adding node-$new_node_num to cluster $cluster_id..."
     
@@ -531,7 +563,7 @@ nodetool_status() {
     cluster_type=$(echo "$meta" | grep -o '"type"[: ]*"[^"]*"' \
                    | grep -o '"[^"]*"$' | tr -d '"')
     local node_count
-    node_count=$(ls "$cluster_dir/nodes" | wc -l | tr -d ' ')
+    node_count=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d \' \')
 
     echo ""
     echo "Note: Cassandra-compatible ring view (modelled after \`nodetool status\`)"
@@ -545,7 +577,8 @@ nodetool_status() {
         "--" "Address" "Load" "Owns (effective)" "Host ID" "Token" "Rack"
 
     local token_base=-9223372036854775808
-    local owns_each=$(( 100 / node_count ))
+    local owns_each
+    owns_each=$(( 100 / node_count ))
 
     local leader
     leader=$(cat "$cluster_dir/state/leader" 2>/dev/null || echo "node-1")
@@ -577,7 +610,8 @@ nodetool_status() {
 
         # Token ring: evenly spaced tokens
         local node_num="${node_id##node-}"
-        local token=$(( token_base + node_num * ( 9223372036854775807 / node_count ) ))
+        local token
+        token=$(( token_base + node_num * ( 9223372036854775807 / node_count ) ))
 
         # Mark leader with an asterisk
         local rack="rack1"
@@ -605,10 +639,11 @@ cassandra_token_ranges() {
     [[ -d "$cluster_dir" ]] || { log_error "Cluster not found: $cluster_id"; return 1; }
 
     local nodes
-    nodes=$(ls "$cluster_dir/nodes" | sort)
+    nodes=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d -printf "%f\n" 2>/dev/null | sort)
     local node_count
     node_count=$(echo "$nodes" | wc -l | tr -d ' ')
-    local range_size=$(( 18446744073709551615 / node_count ))
+    local range_size
+    range_size=$(( 18446744073709551615 / node_count ))
 
     echo ""
     echo "Token Ring — Ownership by Node"
@@ -618,8 +653,10 @@ cassandra_token_ranges() {
 
     local idx=0
     while IFS= read -r node_id; do
-        local start=$(( idx * range_size ))
-        local end=$(( (idx + 1) * range_size - 1 ))
+        local start
+        start=$(( idx * range_size ))
+        local end
+        end=$(( (idx + 1) * range_size - 1 ))
         printf "%-12s %-22s %-22s %s%%\n" \
             "$node_id" "$start" "$end" "$(( 100 / node_count ))"
         (( idx++ ))

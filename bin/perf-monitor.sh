@@ -12,10 +12,12 @@ LIB_DIR="$PROJECT_ROOT/lib"
 DATA_DIR="$PROJECT_ROOT/data"
 LOG_DIR="$PROJECT_ROOT/logs/monitoring"
 
+# shellcheck source=lib/logger.sh
 source "$LIB_DIR/logger.sh"
 
 METRICS_DIR="$DATA_DIR/metrics"
 LOG_FILE="$LOG_DIR/perf-monitor.log"
+export LOG_FILE
 
 ################################################################################
 # Functions
@@ -73,19 +75,26 @@ collect_metrics() {
     fi
     
     # Disk I/O
-    local disk_read_ops=$(( RANDOM % 1000 + 500 ))
-    local disk_write_ops=$(( RANDOM % 800 + 400 ))
+    local disk_read_ops
+    disk_read_ops=$(( RANDOM % 1000 + 500 ))
+    local disk_write_ops
+    disk_write_ops=$(( RANDOM % 800 + 400 ))
     
     # Network
-    local net_rx_bytes=$(( RANDOM % 1000000 + 100000 ))
-    local net_tx_bytes=$(( RANDOM % 800000 + 80000 ))
+    local net_rx_bytes
+    net_rx_bytes=$(( RANDOM % 1000000 + 100000 ))
+    local net_tx_bytes
+    net_tx_bytes=$(( RANDOM % 800000 + 80000 ))
     
     # Latency simulation
-    local read_latency=$(( RANDOM % 20 + 5 ))
-    local write_latency=$(( RANDOM % 30 + 10 ))
+    local read_latency
+    read_latency=$(( RANDOM % 20 + 5 ))
+    local write_latency
+    write_latency=$(( RANDOM % 30 + 10 ))
     
     # Throughput
-    local ops_per_sec=$(( RANDOM % 5000 + 2000 ))
+    local ops_per_sec
+    ops_per_sec=$(( RANDOM % 5000 + 2000 ))
     
     # Save metrics
     local metrics_file="$METRICS_DIR/cluster-$cluster_id-$(date +%Y%m%d).json"
@@ -133,13 +142,15 @@ show_dashboard() {
         echo ""
         
         # CPU Usage
-        local cpu_percent=$(( RANDOM % 40 + 30 ))
+        local cpu_percent
+        cpu_percent=$(( RANDOM % 40 + 30 ))
         echo "$(tput bold)CPU Usage:$(tput sgr0)"
         draw_bar "$cpu_percent" "100"
         echo ""
         
         # Memory Usage
-        local mem_percent=$(( RANDOM % 30 + 40 ))
+        local mem_percent
+        mem_percent=$(( RANDOM % 30 + 40 ))
         echo "$(tput bold)Memory Usage:$(tput sgr0)"
         draw_bar "$mem_percent" "100"
         echo ""
@@ -189,22 +200,24 @@ draw_bar() {
     local max=$2
     local width=50
     
-    local filled=$(( value * width / max ))
-    local empty=$(( width - filled ))
+    local filled
+    filled=$(( value * width / max ))
+    local empty
+    empty=$(( width - filled ))
     
     printf "  ["
     
     # Color based on value
     if [[ $value -lt 50 ]]; then
-        printf "$(tput setaf 2)"  # Green
+        printf '%s' "$(tput setaf 2)"  # Green
     elif [[ $value -lt 75 ]]; then
-        printf "$(tput setaf 3)"  # Yellow
+        printf '%s' "$(tput setaf 3)"  # Yellow
     else
-        printf "$(tput setaf 1)"  # Red
+        printf '%s' "$(tput setaf 1)"  # Red
     fi
     
     printf "%${filled}s" | tr ' ' '='
-    printf "$(tput sgr0)"
+    printf '%s' "$(tput sgr0)"
     printf "%${empty}s" | tr ' ' ' '
     printf "] %3d%%\n" "$value"
 }
@@ -489,9 +502,12 @@ HEADER
         [[ "$cluster_status" == "healthy" ]] && is_healthy=1
 
         # Simulated latency / throughput (in a real deployment, read from a TSDB)
-        local read_lat=$(( RANDOM % 20 + 5 ))
-        local write_lat=$(( RANDOM % 30 + 10 ))
-        local ops=$(( RANDOM % 5000 + 2000 ))
+        local read_lat
+        read_lat=$(( RANDOM % 20 + 5 ))
+        local write_lat
+        write_lat=$(( RANDOM % 30 + 10 ))
+        local ops
+        ops=$(( RANDOM % 5000 + 2000 ))
 
         # Common label set
         local labels="cluster_id=\"${cluster_id}\",name=\"${cluster_name}\",type=\"${cluster_type}\""

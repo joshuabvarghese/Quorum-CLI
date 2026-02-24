@@ -11,10 +11,6 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BIN_DIR="$PROJECT_ROOT/bin"
 
 # Colors
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
 
 demo_message() {
     echo ""
@@ -24,7 +20,7 @@ demo_message() {
 
 press_enter() {
     echo ""
-    read -p "$(tput setaf 3)Press ENTER to continue...$(tput sgr0)" 
+    read -r -p "$(tput setaf 3)Press ENTER to continue...$(tput sgr0)" 
 }
 
 clear_screen() {
