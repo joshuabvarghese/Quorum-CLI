@@ -6,6 +6,9 @@
 
 set -euo pipefail
 
+# Ensure tput works in non-interactive (CI) environments
+export TERM="${TERM:-dumb}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BIN_DIR="$PROJECT_ROOT/bin"
@@ -15,10 +18,17 @@ BIN_DIR="$PROJECT_ROOT/bin"
 demo_message() {
     echo ""
     echo "$(tput setaf 6)$(tput bold)>>> $1$(tput sgr0)"
-    sleep 2
+    # Skip sleep in CI / non-interactive mode
+    if [[ -z "${CI:-}" ]] && [[ -t 0 ]]; then
+        sleep 2
+    fi
 }
 
 press_enter() {
+    # Skip interactive pauses when running in CI or non-interactive mode
+    if [[ -n "${CI:-}" ]] || [[ ! -t 0 ]]; then
+        return 0
+    fi
     echo ""
     read -r -p "$(tput setaf 3)Press ENTER to continue...$(tput sgr0)" 
 }
@@ -226,7 +236,9 @@ EOF
 ################################################################################
 
 echo "Starting automated demo in 3 seconds..."
-sleep 3
+if [[ -z "${CI:-}" ]] && [[ -t 0 ]]; then
+    sleep 3
+fi
 
 run_demo
 
