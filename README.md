@@ -5,7 +5,7 @@
 ![Chaos Engineering](https://img.shields.io/badge/practice-Chaos%20Engineering-red)
 ![Strict Mode](https://img.shields.io/badge/bash-strict%20mode-brightgreen)
 
-A production-grade command-line tool suite for managing distributed storage systems, data replication, and cluster operations — built entirely with Linux CLI tools.
+A production-grade command-line tool suite for managing distributed storage systems, data replication, and cluster operations — buixlt entirely with Linux CLI tools.
 
 ---
 
