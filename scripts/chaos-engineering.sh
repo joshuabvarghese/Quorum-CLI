@@ -11,6 +11,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BIN_DIR="$PROJECT_ROOT/bin"
 DATA_DIR="$PROJECT_ROOT/data"
 
+# shellcheck source=lib/logger.sh
 source "$PROJECT_ROOT/lib/logger.sh"
 
 ################################################################################
@@ -521,10 +522,12 @@ simulate_iptables_partition() {
         return 0
     fi
 
-    ssh -o ConnectTimeout=5 -o BatchMode=yes "${ssh_user}@${target_node}" \
-        "${cmd_in} && ${cmd_out}" 2>/dev/null \
-        && log_success "Partition applied on ${target_node}" \
-        || log_warn "SSH unavailable — partition recorded in state only (no real firewall rule)"
+    if ssh -o ConnectTimeout=5 -o BatchMode=yes "${ssh_user}@${target_node}" \
+        "${cmd_in} && ${cmd_out}" 2>/dev/null; then
+        log_success "Partition applied on ${target_node}"
+    else
+        log_warn "SSH unavailable — partition recorded in state only (no real firewall rule)"
+    fi
 }
 
 simulate_iptables_heal() {
@@ -544,8 +547,10 @@ simulate_iptables_heal() {
         return 0
     fi
 
-    ssh -o ConnectTimeout=5 -o BatchMode=yes "${ssh_user}@${target_node}" \
-        "${cmd_in}; ${cmd_out}" 2>/dev/null \
-        && log_success "Partition healed on ${target_node}" \
-        || log_warn "SSH unavailable — state cleaned locally"
+    if ssh -o ConnectTimeout=5 -o BatchMode=yes "${ssh_user}@${target_node}" \
+        "${cmd_in}; ${cmd_out}" 2>/dev/null; then
+        log_success "Partition healed on ${target_node}"
+    else
+        log_warn "SSH unavailable — state cleaned locally"
+    fi
 }

@@ -11,8 +11,10 @@ readonly COLOR_GREEN='\033[0;32m'
 readonly COLOR_YELLOW='\033[0;33m'
 readonly COLOR_BLUE='\033[0;34m'
 readonly COLOR_MAGENTA='\033[0;35m'
+export COLOR_MAGENTA
 readonly COLOR_CYAN='\033[0;36m'
 readonly COLOR_BOLD='\033[1m'
+export COLOR_BOLD
 
 # Log levels
 readonly LOG_LEVEL_DEBUG=0
@@ -81,7 +83,7 @@ log_success() {
 show_spinner() {
     local pid=$1
     local message="${2:-Processing}"
-    local spinstr='|/-\'
+    local spinstr; spinstr='|/-\\'
     
     while kill -0 "$pid" 2>/dev/null; do
         local temp=${spinstr#?}

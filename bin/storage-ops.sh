@@ -1,4 +1,3 @@
-cat > bin/storage-ops.sh << 'EOF'
 #!/bin/bash
 
 ################################################################################
@@ -13,11 +12,13 @@ LIB_DIR="$PROJECT_ROOT/lib"
 DATA_DIR="$PROJECT_ROOT/data"
 LOG_DIR="$PROJECT_ROOT/logs/storage"
 
+# shellcheck source=lib/logger.sh
 source "$LIB_DIR/logger.sh"
 
 VOLUME_DIR="$DATA_DIR/volumes"
 SNAPSHOT_DIR="$DATA_DIR/snapshots"
 LOG_FILE="$LOG_DIR/storage-ops.log"
+export LOG_FILE
 
 ################################################################################
 # Functions
@@ -50,6 +51,7 @@ Examples:
 
 EOF
     exit 0
+}
 
 initialize_storage() {
     mkdir -p "$VOLUME_DIR" "$SNAPSHOT_DIR" "$LOG_DIR"
@@ -59,17 +61,29 @@ provision_volume() {
     local cluster_id="$1"
     local size_str="$2"
     local replication="${3:-3}"
+    local dry_run="${4:-false}"
     
     # Parse size
     local size_mb
     size_mb=$(parse_size "$size_str")
     
     # Generate volume ID
-    local volume_id="vol-$(date +%s)-$(openssl rand -hex 3 2>/dev/null || echo $RANDOM)"
+    local volume_id="vol-$(date +%s)-$(openssl rand -hex 3 2>/dev/null || echo "$RANDOM")"
     local volume_dir="$VOLUME_DIR/$volume_id"
     
     log_info "Provisioning volume: $volume_id"
     log_info "Size: $size_str ($size_mb MB), Replication: $replication"
+    
+    # Dry-run: show what would happen without creating anything
+    if [[ "$dry_run" == "true" ]]; then
+        log_warn "DRY-RUN: Would create volume $volume_id ($size_str, replication=$replication)"
+        log_warn "DRY-RUN: No files created."
+        echo ""
+        echo "Volume ID: $volume_id (dry-run — not persisted)"
+        echo "Size: $size_str"
+        echo "Replication: $replication"
+        return 0
+    fi
     
     # Create volume directory
     mkdir -p "$volume_dir"/{data,metadata,replicas}
@@ -198,7 +212,7 @@ create_snapshot() {
         return 1
     fi
     
-    local snapshot_id="snap-$(date +%s)-$(openssl rand -hex 3 2>/dev/null || echo $RANDOM)"
+    local snapshot_id="snap-$(date +%s)-$(openssl rand -hex 3 2>/dev/null || echo "$RANDOM")"
     local snapshot_dir="$SNAPSHOT_DIR/$snapshot_id"
     
     log_info "Creating snapshot: $snapshot_id"
@@ -323,7 +337,7 @@ show_stats() {
     fi
     
     if [[ -d "$SNAPSHOT_DIR" ]]; then
-        total_snapshots=$(ls -1 "$SNAPSHOT_DIR" 2>/dev/null | wc -l | tr -d ' ')
+        total_snapshots=$(find "$SNAPSHOT_DIR" -maxdepth 1 -mindepth 1 2>/dev/null | wc -l | tr -d \' \')
     fi
     
     local usage_percent=0
@@ -365,6 +379,7 @@ main() {
     local size=""
     local replication=3
     local retention="7d"
+    local dry_run=false
     
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -388,6 +403,10 @@ main() {
                 retention="$2"
                 shift 2
                 ;;
+            --dry-run)
+                dry_run=true
+                shift
+                ;;
             --help)
                 show_usage
                 ;;
@@ -402,7 +421,7 @@ main() {
         provision)
             [[ -z "$cluster_id" ]] && { log_error "Cluster ID required"; exit 1; }
             [[ -z "$size" ]] && { log_error "Size required"; exit 1; }
-            provision_volume "$cluster_id" "$size" "$replication"
+            provision_volume "$cluster_id" "$size" "$replication" "$dry_run"
             ;;
         list)
             list_volumes
@@ -426,4 +445,3 @@ main() {
 }
 
 main "$@"
-EOF

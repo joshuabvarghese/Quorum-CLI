@@ -8,12 +8,15 @@
 readonly CLUSTER_STATUS_HEALTHY="healthy"
 readonly CLUSTER_STATUS_DEGRADED="degraded"
 readonly CLUSTER_STATUS_UNHEALTHY="unhealthy"
+# shellcheck disable=SC2034
 readonly CLUSTER_STATUS_INITIALIZING="initializing"
 
 # Node status constants
 readonly NODE_STATUS_UP="up"
 readonly NODE_STATUS_DOWN="down"
+# shellcheck disable=SC2034
 readonly NODE_STATUS_STARTING="starting"
+# shellcheck disable=SC2034
 readonly NODE_STATUS_STOPPING="stopping"
 
 ################################################################################
@@ -105,7 +108,7 @@ count_up_nodes() {
         local status
         status=$(grep -o '"status"[: ]*"[^"]*"' "${node_dir}/metadata.json" \
                  | grep -o '"[^"]*"$' | tr -d '"')
-        [[ "$status" == "up" ]] && (( count++ )) || true
+        if [[ "$status" == "up" ]]; then (( count++ )) || true; fi
     done
 
     echo "$count"
@@ -119,7 +122,7 @@ count_total_nodes() {
     local count=0
 
     for node_dir in "${cluster_dir}/nodes"/*/; do
-        [[ -d "$node_dir" ]] && (( count++ )) || true
+        if [[ -d "$node_dir" ]]; then (( count++ )) || true; fi
     done
 
     echo "$count"
@@ -237,10 +240,9 @@ elect_leader() {
     # Get all UP nodes
     local up_nodes=()
     
-    for node_dir in "$cluster_dir/nodes"/*; do
+    while IFS= read -r node_id; do
+        local node_dir="$cluster_dir/nodes/$node_id"
         if [[ -d "$node_dir" ]]; then
-            local node_id
-            node_id=$(basename "$node_dir")
             
             local status
             status=$(grep -o '"status"[: ]*"[^"]*"' "$node_dir/metadata.json" | grep -o '"[^"]*"$' | tr -d '"')
@@ -287,7 +289,7 @@ calculate_replication_status() {
     repl_factor=$(echo "$metadata" | grep -o '"replication_factor": [0-9]*' | awk '{print $2}')
     
     local node_count
-    node_count=$(ls -1 "$cluster_dir/nodes" | wc -l | tr -d ' ')
+    node_count=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d \' \')
     
     if [[ $node_count -ge $repl_factor ]]; then
         echo "synchronized"
