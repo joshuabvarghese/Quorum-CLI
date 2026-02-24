@@ -141,7 +141,7 @@ parse_size() {
     number=$(echo "$size_str" | grep -o '[0-9]*')
     unit=$(echo "$size_str" | grep -o '[A-Za-z]*')
     
-    case "${unit^^}" in
+    case "$(echo "$unit" | tr "[:lower:]" "[:upper:]")" in
         GB|G)
             echo $((number * 1024))
             ;;

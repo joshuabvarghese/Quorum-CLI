@@ -295,16 +295,16 @@ colorize_status() {
     local status="$1"
     case "$status" in
         up|healthy|running)
-            echo "$(tput setaf 2)${status^^}$(tput sgr0)"
+            echo "$(tput setaf 2)$(echo "$status" | tr "[:lower:]" "[:upper:]")$(tput sgr0)"
             ;;
         down|unhealthy|failed)
-            echo "$(tput setaf 1)${status^^}$(tput sgr0)"
+            echo "$(tput setaf 1)$(echo "$status" | tr "[:lower:]" "[:upper:]")$(tput sgr0)"
             ;;
         warning|degraded)
-            echo "$(tput setaf 3)${status^^}$(tput sgr0)"
+            echo "$(tput setaf 3)$(echo "$status" | tr "[:lower:]" "[:upper:]")$(tput sgr0)"
             ;;
         *)
-            echo "${status^^}"
+            echo "$(echo "$status" | tr "[:lower:]" "[:upper:]")"
             ;;
     esac
 }
