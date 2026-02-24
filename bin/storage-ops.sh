@@ -6,11 +6,14 @@
 
 set -euo pipefail
 
+# Ensure tput works in non-interactive (CI) environments
+export TERM="${TERM:-dumb}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 LIB_DIR="$PROJECT_ROOT/lib"
-DATA_DIR="$PROJECT_ROOT/data"
-LOG_DIR="$PROJECT_ROOT/logs/storage"
+DATA_DIR="${DATA_DIR:-$PROJECT_ROOT/data}"
+LOG_DIR="${LOG_DIR:-$PROJECT_ROOT/logs/storage}"
 
 # shellcheck source=lib/logger.sh
 source "$LIB_DIR/logger.sh"
@@ -102,9 +105,8 @@ provision_volume() {
 }
 EOF
     
-    # Simulate data allocation
-    dd if=/dev/zero of="$volume_dir/data/volume.dat" bs=1m count="$size_mb" 2>/dev/null || \
-        dd if=/dev/zero of="$volume_dir/data/volume.dat" bs=1M count="$size_mb" 2>/dev/null
+    # Simulate data allocation (placeholder file — avoids writing gigabytes in a demo)
+    touch "$volume_dir/data/volume.dat"
     
     # Create replicas
     for ((i=1; i<=replication; i++)); do
@@ -273,7 +275,7 @@ verify_integrity() {
     
     for replica_dir in "$VOLUME_DIR/$volume_id/replicas"/*; do
         if [[ -d "$replica_dir" ]]; then
-            ((replica_count++))
+            ((replica_count++)) || true
             
             local replica_id
             replica_id=$(basename "$replica_dir")
@@ -282,7 +284,7 @@ verify_integrity() {
             status=$(grep '"status"' "$replica_dir/metadata.json" | cut -d'"' -f4)
             
             if [[ "$status" == "synced" ]]; then
-                ((synced_count++))
+                ((synced_count++)) || true
                 log_info "  $replica_id: ✓ SYNCED"
             else
                 log_warn "  $replica_id: ✗ OUT OF SYNC"
@@ -320,7 +322,7 @@ show_stats() {
     if [[ -d "$VOLUME_DIR" ]]; then
         for volume_dir in "$VOLUME_DIR"/*; do
             if [[ -d "$volume_dir" ]]; then
-                ((total_volumes++))
+                ((total_volumes++)) || true
                 
                 local metadata
                 metadata=$(cat "$volume_dir/metadata/volume.json" 2>/dev/null || echo '{}')
@@ -337,7 +339,7 @@ show_stats() {
     fi
     
     if [[ -d "$SNAPSHOT_DIR" ]]; then
-        total_snapshots=$(find "$SNAPSHOT_DIR" -maxdepth 1 -mindepth 1 2>/dev/null | wc -l | tr -d \' \')
+        total_snapshots=$(find "$SNAPSHOT_DIR" -maxdepth 1 -mindepth 1 2>/dev/null | wc -l | tr -d ' ')
     fi
     
     local usage_percent=0

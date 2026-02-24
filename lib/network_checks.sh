@@ -17,6 +17,9 @@
 ################################################################################
 
 set -euo pipefail
+
+# Ensure tput works in non-interactive (CI) environments
+export TERM="${TERM:-dumb}"
 IFS=$'\n\t'
 
 # Default timeouts (override via env vars)
