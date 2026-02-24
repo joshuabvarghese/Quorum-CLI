@@ -44,3 +44,21 @@ case "${1:-}" in
         echo "Usage: $0 {partition|kill-node} [options]"
         ;;
 esac
+
+    recover-node)
+        shift
+        cid=""; nid=""
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --cluster-id) cid="$2"; shift 2 ;;
+                --node-id) nid="$2"; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        log_info "RECOVERING: Bringing $nid back online..."
+        meta="./data/clusters/$cid/nodes/$nid/metadata.json"
+        if [[ -f "$meta" ]]; then
+            sed -i '' 's/"status": "down"/"status": "up"/' "$meta" 2>/dev/null || sed -i 's/"status": "down"/"status": "up"/' "$meta"
+            log_success "$nid is now UP and resyncing."
+        fi
+        ;;
