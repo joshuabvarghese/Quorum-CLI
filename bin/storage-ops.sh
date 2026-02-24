@@ -70,8 +70,9 @@ provision_volume() {
     local size_mb
     size_mb=$(parse_size "$size_str")
     
-    # Generate volume ID
-    local volume_id="vol-$(date +%s)-$(openssl rand -hex 3 2>/dev/null || echo "$RANDOM")"
+    # Generate volume ID - FIXED: Separate declaration and assignment
+    local volume_id
+    volume_id="vol-$(date +%s)-$(openssl rand -hex 3 2>/dev/null || echo "$RANDOM")"
     local volume_dir="$VOLUME_DIR/$volume_id"
     
     log_info "Provisioning volume: $volume_id"
@@ -214,7 +215,9 @@ create_snapshot() {
         return 1
     fi
     
-    local snapshot_id="snap-$(date +%s)-$(openssl rand -hex 3 2>/dev/null || echo "$RANDOM")"
+    # FIXED: Separate declaration and assignment
+    local snapshot_id
+    snapshot_id="snap-$(date +%s)-$(openssl rand -hex 3 2>/dev/null || echo "$RANDOM")"
     local snapshot_dir="$SNAPSHOT_DIR/$snapshot_id"
     
     log_info "Creating snapshot: $snapshot_id"

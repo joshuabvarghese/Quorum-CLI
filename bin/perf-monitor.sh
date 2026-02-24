@@ -100,7 +100,8 @@ collect_metrics() {
     ops_per_sec=$(( RANDOM % 5000 + 2000 ))
     
     # Save metrics
-    local metrics_file="$METRICS_DIR/cluster-$cluster_id-$(date +%Y%m%d).json"
+    local metrics_file
+metrics_file="$METRICS_DIR/cluster-$cluster_id-$(date +%Y%m%d).json"
     
     cat >> "$metrics_file" << EOF
 {
