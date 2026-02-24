@@ -47,7 +47,7 @@ run_demo() {
     cat << "EOF"
 ╔══════════════════════════════════════════════════════════════════╗
 ║                                                                  ║
-║        DISTRIBUTED STORAGE & DATA PLATFORM MANAGER               ║
+║                QUORUM CLI - CLUSTER MANAGER                      ║
 ║                     Live Demonstration                           ║
 ║                                                                  ║
 ╚══════════════════════════════════════════════════════════════════╝
