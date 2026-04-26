@@ -6,8 +6,6 @@ SCRIPTS := bin/cluster-manager.sh \
            lib/logger.sh \
            lib/cluster-lib.sh \
            lib/network_checks.sh \
-           lib/state-db.sh \
-           lib/ssh-hardening.sh \
            scripts/chaos-engineering.sh \
            scripts/demo.sh
 
