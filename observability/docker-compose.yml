@@ -1,0 +1,144 @@
+################################################################################
+# Quorum-CLI Observability Stack
+#
+# Services:
+#   prometheus    Scrapes /metrics from cluster-manager.sh server mode
+#   loki          Log aggregation backend
+#   promtail      Ships Quorum-CLI JSON logs → Loki
+#   grafana       Pre-configured dashboards for cluster health + quorum loss
+#   alertmanager  Fires alerts on quorum loss, node down, high leader churn
+#
+# Quick start:
+#   docker compose up -d
+#   open http://localhost:3000      (Grafana — admin/admin)
+#   open http://localhost:9090      (Prometheus)
+#   open http://localhost:9093      (Alertmanager)
+#
+# Point cluster-manager.sh at this stack:
+#   ./bin/cluster-manager.sh server --port 9099 &
+#   # Prometheus will auto-scrape :9099/clusters/<id>/metrics
+#
+# Tear down:
+#   docker compose down -v
+################################################################################
+
+version: "3.9"
+
+networks:
+  quorum-obs:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  loki_data:
+  grafana_data:
+  alertmanager_data:
+
+services:
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Prometheus — scrapes the cluster-manager.sh REST API
+  # ──────────────────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: quorum-prometheus
+    restart: unless-stopped
+    networks: [quorum-obs]
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"           # POST /-/reload to hot-reload config
+      - "--alertmanager.notification-queue-capacity=10000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Alertmanager — routes quorum-loss alerts
+  # ──────────────────────────────────────────────────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: quorum-alertmanager
+    restart: unless-stopped
+    networks: [quorum-obs]
+    ports:
+      - "9093:9093"
+    volumes:
+      - alertmanager_data:/alertmanager
+      - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--log.level=info"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Loki — log aggregation backend
+  # ──────────────────────────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:2.9.6
+    container_name: quorum-loki
+    restart: unless-stopped
+    networks: [quorum-obs]
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/loki
+      - ./observability/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+    command: -config.file=/etc/loki/local-config.yaml
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3100/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Promtail — ships Quorum-CLI JSON logs to Loki
+  # ──────────────────────────────────────────────────────────────────────────
+  promtail:
+    image: grafana/promtail:2.9.6
+    container_name: quorum-promtail
+    restart: unless-stopped
+    networks: [quorum-obs]
+    volumes:
+      - ./observability/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - ./logs:/var/log/quorum:ro          # mount Quorum-CLI log directory
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Grafana — dashboards + datasource provisioning
+  # ──────────────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: quorum-grafana
+    restart: unless-stopped
+    networks: [quorum-obs]
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/quorum-overview.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - loki
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5

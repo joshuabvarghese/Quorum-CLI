@@ -1,0 +1,79 @@
+---
+# Alertmanager routing for Quorum-CLI alerts
+#
+# Configure your receivers by setting environment variables or editing this file:
+#   SLACK_WEBHOOK_URL   — Slack incoming webhook
+#   PAGERDUTY_KEY       — PagerDuty Events API v2 integration key
+#
+# Route logic:
+#   critical  → PagerDuty (immediate page) + Slack #incidents
+#   warning   → Slack #alerts only (no page)
+#   info      → Slack #alerts (low-priority)
+
+global:
+  resolve_timeout: 5m
+  slack_api_url: "${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/REPLACE_ME}"
+  pagerduty_url:  "https://events.pagerduty.com/v2/enqueue"
+
+templates:
+  - "/etc/alertmanager/templates/*.tmpl"
+
+route:
+  receiver: slack-alerts
+  group_by: [alertname, cluster, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    # Critical: quorum lost or cluster unhealthy → page immediately
+    - matchers:
+        - severity = critical
+      receiver: pagerduty-critical
+      group_wait: 0s          # no wait — page immediately on quorum loss
+      repeat_interval: 30m
+      continue: true          # also send to Slack
+
+    # Warning: degraded or nodes down → Slack only
+    - matchers:
+        - severity = warning
+      receiver: slack-alerts
+      repeat_interval: 2h
+
+receivers:
+
+  - name: slack-alerts
+    slack_configs:
+      - channel: "#quorum-alerts"
+        send_resolved: true
+        icon_emoji: ":satellite:"
+        title: |
+          [{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}]
+          {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+        text: |
+          {{ range .Alerts }}
+          *Severity:* {{ .Labels.severity }}
+          *Cluster:* {{ .Labels.cluster }}
+          {{ .Annotations.description }}
+          {{ if .Annotations.runbook_url }}*Runbook:* {{ .Annotations.runbook_url }}{{ end }}
+          {{ end }}
+
+  - name: pagerduty-critical
+    pagerduty_configs:
+      - routing_key: "${PAGERDUTY_KEY:-REPLACE_WITH_YOUR_KEY}"
+        description: |
+          {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+        severity: critical
+        details:
+          cluster: '{{ range .Alerts }}{{ .Labels.cluster }}{{ end }}'
+          description: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+          runbook: '{{ range .Alerts }}{{ .Annotations.runbook_url }}{{ end }}'
+
+inhibit_rules:
+  # If a cluster is fully unhealthy, suppress the NodeDown warning
+  # (it would fire for every node — the ClusterUnhealthy alert is enough)
+  - source_matchers:
+      - alertname = ClusterUnhealthy
+    target_matchers:
+      - alertname = NodesDown
+    equal: [cluster]

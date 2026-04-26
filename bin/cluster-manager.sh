@@ -50,6 +50,7 @@ Commands:
     scale                   Scale cluster up/down
     diagnose                Run cluster diagnostics
     metrics                 Expose Prometheus-format metrics for a cluster
+    server                  Run a simple REST API server (requires socat or nc)
 
 Options:
     --name <name>           Cluster name
@@ -58,6 +59,7 @@ Options:
     --cluster-id <id>       Cluster ID
     --node-id <id>          Node ID
     --replication-factor <n> Replication factor (default: 3)
+    --port <n>              Port for --server mode (default: 9099)
     --verbose               Verbose output
     --help                  Show this help
 
@@ -102,6 +104,24 @@ create_cluster() {
     local cluster_type="${3:-cassandra}"
     local replication_factor="${4:-3}"
     
+    # Idempotency guard: refuse to silently create duplicate cluster names
+    if [[ -d "$CLUSTER_DATA_DIR" ]]; then
+        for _existing_dir in "$CLUSTER_DATA_DIR"/*/; do
+            [[ -d "$_existing_dir" ]] || continue
+            local _existing_meta="$_existing_dir/metadata/cluster.json"
+            [[ -f "$_existing_meta" ]] || continue
+            local _existing_name
+            _existing_name=$(grep -o '"name": "[^"]*"' "$_existing_meta" | cut -d'"' -f4)
+            if [[ "$_existing_name" == "$cluster_name" ]]; then
+                local _existing_id
+                _existing_id=$(basename "$_existing_dir")
+                log_error "Cluster '${cluster_name}' already exists (ID: ${_existing_id})"
+                echo "  To replace it:  $(basename "$0") destroy --cluster-id ${_existing_id}" >&2
+                return 1
+            fi
+        done
+    fi
+
     log_info "Creating cluster: $cluster_name"
     log_info "Type: $cluster_type, Nodes: $node_count, Replication: $replication_factor"
     
@@ -126,10 +146,18 @@ create_cluster() {
 }
 EOF
     
-    # Create nodes
-    log_info "Provisioning $node_count nodes..."
+    # Create nodes in parallel — background each create_node call,
+    # collect PIDs, then wait for all to complete before proceeding.
+    # This cuts provisioning time from O(N*serial) to O(1*parallel).
+    log_info "Provisioning $node_count nodes in parallel..."
+    local -a _node_pids=()
     for ((i=1; i<=node_count; i++)); do
-        create_node "$cluster_id" "$i" "$cluster_type" "$((7000 + i))"
+        create_node "$cluster_id" "$i" "$cluster_type" "$((7000 + i))" &
+        _node_pids+=($!)
+    done
+    # Wait for every provisioning job; surface any failures
+    for _pid in "${_node_pids[@]}"; do
+        wait "$_pid" || { log_error "Node provisioning job $_pid failed"; return 1; }
     done
     
     # Elect leader (first node)
@@ -392,34 +420,53 @@ update_cluster_status() {
     fi
 }
 
+# add_nodes_parallel <cluster_id> <count>
+# Provisions <count> new nodes in parallel using background subshells,
+# then waits for all jobs before updating cluster metadata.
+# This is the engine behind both add-node and scale.
+add_nodes_parallel() {
+    local cluster_id="$1"
+    local count="${2:-1}"
+
+    local cluster_dir="$CLUSTER_DATA_DIR/$cluster_id"
+    local current_nodes
+    current_nodes=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+
+    log_info "Provisioning $count new node(s) in parallel (current total: $current_nodes)..."
+
+    local -a _pids=()
+    for (( i=1; i<=count; i++ )); do
+        local new_node_num=$(( current_nodes + i ))
+        create_node "$cluster_id" "$new_node_num" "cassandra" "$((7000 + new_node_num))" &
+        _pids+=($!)
+    done
+
+    # Wait for all provisioning jobs
+    for _pid in "${_pids[@]}"; do
+        wait "$_pid" || { log_error "Node provisioning job $_pid failed"; return 1; }
+    done
+
+    local final_count=$(( current_nodes + count ))
+    local metadata_file="$cluster_dir/metadata/cluster.json"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "s/\"node_count\": [0-9]*/\"node_count\": $final_count/" "$metadata_file"
+    else
+        sed -i "s/\"node_count\": [0-9]*/\"node_count\": $final_count/" "$metadata_file"
+    fi
+
+    log_success "Done. Cluster now has $final_count node(s)"
+}
+
 add_node_to_cluster() {
     local cluster_id="$1"
-    
+    local count="${2:-1}"
+
     if [[ ! -d "$CLUSTER_DATA_DIR/$cluster_id" ]]; then
         log_error "Cluster not found: $cluster_id"
         return 1
     fi
-    
-    local cluster_dir="$CLUSTER_DATA_DIR/$cluster_id"
-    local current_nodes
-    current_nodes=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
-    local new_node_num
-    new_node_num=$((current_nodes + 1))
-    
-    log_info "Adding node-$new_node_num to cluster $cluster_id..."
-    
-    # Create new node
-    create_node "$cluster_id" "$new_node_num" "cassandra" "$((7000 + new_node_num))"
-    
-    # Update cluster metadata
-    local metadata_file="$cluster_dir/metadata/cluster.json"
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s/\"node_count\": [0-9]*/\"node_count\": $new_node_num/" "$metadata_file"
-    else
-        sed -i "s/\"node_count\": [0-9]*/\"node_count\": $new_node_num/" "$metadata_file"
-    fi
-    
-    log_success "Node added successfully! Total nodes: $new_node_num"
+
+    add_nodes_parallel "$cluster_id" "$count"
 }
 
 ################################################################################
@@ -555,6 +602,7 @@ main() {
     local cluster_id=""
     local replication_factor=3
     local verbose=false
+    local api_port=9099
     
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -581,6 +629,10 @@ main() {
             --verbose)
                 verbose=true
                 shift
+                ;;
+            --port)
+                api_port="$2"
+                shift 2
                 ;;
             --help)
                 show_usage
@@ -619,7 +671,23 @@ main() {
                 log_error "Cluster ID is required"
                 exit 1
             fi
-            add_node_to_cluster "$cluster_id"
+            add_node_to_cluster "$cluster_id" "1"
+            ;;
+        scale)
+            if [[ -z "$cluster_id" ]]; then
+                log_error "Cluster ID is required"
+                exit 1
+            fi
+            local _current_count
+            _current_count=$(find "$CLUSTER_DATA_DIR/$cluster_id/nodes" \
+                -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+            if [[ "$node_count" -le "$_current_count" ]]; then
+                log_error "Target node count ($node_count) must exceed current ($_current_count). Use remove-node to scale down."
+                exit 1
+            fi
+            local _add_count=$(( node_count - _current_count ))
+            log_info "Scaling cluster from $_current_count → $node_count nodes (adding $_add_count)"
+            add_node_to_cluster "$cluster_id" "$_add_count"
             ;;
         metrics)
             if [[ -z "$cluster_id" ]]; then
@@ -641,6 +709,9 @@ main() {
                 exit 1
             fi
             cassandra_token_ranges "$cluster_id"
+            ;;
+        server)
+            api_server "$api_port"
             ;;
         *)
             log_error "Unknown command: $command"
@@ -784,6 +855,154 @@ cassandra_token_ranges() {
         (( idx++ ))
     done <<< "$nodes"
     echo ""
+}
+
+################################################################################
+# api_server — minimal HTTP/1.0 REST API served via socat (or nc fallback)
+#
+# Protocol: HTTP/1.0 plain-text.  No TLS termination here — put nginx/haproxy
+# in front for production.  Each request is handled by a subshell; socat
+# forks per-connection so requests are effectively concurrent.
+#
+# Endpoints:
+#   GET /healthz                    Liveness probe (always 200 OK)
+#   GET /clusters                   List clusters (JSON array)
+#   GET /clusters/<id>/status       Cluster status (JSON)
+#   GET /clusters/<id>/metrics      Prometheus metrics (text/plain)
+#   POST /clusters/<id>/add-node    Add one node (JSON response)
+#
+# Usage:
+#   ./bin/cluster-manager.sh server --port 9099
+#   curl http://localhost:9099/healthz
+#   curl http://localhost:9099/clusters
+#   curl http://localhost:9099/clusters/cls-001/metrics
+################################################################################
+
+_http_200() {
+    local content_type="${1:-application/json}"
+    local body="$2"
+    printf "HTTP/1.0 200 OK\r\nContent-Type: %s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s" \
+        "$content_type" "${#body}" "$body"
+}
+
+_http_404() {
+    local body=\'{"error":"not found"}\'
+    printf "HTTP/1.0 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s" \
+        "${#body}" "$body"
+}
+
+_http_400() {
+    local body="{\"error\":\"$1\"}"
+    printf "HTTP/1.0 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s" \
+        "${#body}" "$body"
+}
+
+_api_handle_request() {
+    # Read the HTTP request line from stdin (socat pipes it here)
+    local request_line
+    IFS= read -r request_line
+    request_line="${request_line%$'\r'}"  # strip CR
+
+    local method path
+    method=$(echo "$request_line" | awk \'{ print $1 }\')
+    path=$(echo "$request_line"   | awk \'{ print $2 }\')
+
+    # Drain headers (we don\'t use them but must consume before writing response)
+    while IFS= read -r header && [[ "$header" != $\'\r\' ]] && [[ -n "$header" ]]; do :; done
+
+    case "$path" in
+        /healthz)
+            _http_200 "text/plain" "OK"
+            ;;
+
+        /clusters)
+            local json="["
+            local first=true
+            if [[ -d "$CLUSTER_DATA_DIR" ]]; then
+                for _cdir in "$CLUSTER_DATA_DIR"/*/; do
+                    [[ -d "$_cdir" ]] || continue
+                    local _cmeta="$_cdir/metadata/cluster.json"
+                    [[ -f "$_cmeta" ]] || continue
+                    $first || json+=","
+                    json+=$(cat "$_cmeta")
+                    first=false
+                done
+            fi
+            json+="]"
+            _http_200 "application/json" "$json"
+            ;;
+
+        /clusters/*/status)
+            local cid="${path#/clusters/}"
+            cid="${cid%/status}"
+            if [[ ! -d "$CLUSTER_DATA_DIR/$cid" ]]; then
+                _http_404
+            else
+                local body
+                body=$(cat "$CLUSTER_DATA_DIR/$cid/metadata/cluster.json")
+                _http_200 "application/json" "$body"
+            fi
+            ;;
+
+        /clusters/*/metrics)
+            local cid="${path#/clusters/}"
+            cid="${cid%/metrics}"
+            if [[ ! -d "$CLUSTER_DATA_DIR/$cid" ]]; then
+                _http_404
+            else
+                local body
+                body=$(emit_prometheus_metrics "$cid" 2>/dev/null)
+                _http_200 "text/plain; version=0.0.4" "$body"
+            fi
+            ;;
+
+        /clusters/*/add-node)
+            if [[ "$method" != "POST" ]]; then
+                _http_400 "method must be POST"
+                return
+            fi
+            local cid="${path#/clusters/}"
+            cid="${cid%/add-node}"
+            if [[ ! -d "$CLUSTER_DATA_DIR/$cid" ]]; then
+                _http_404
+            else
+                add_node_to_cluster "$cid" "1" &>/dev/null
+                local body
+                body=$(cat "$CLUSTER_DATA_DIR/$cid/metadata/cluster.json")
+                _http_200 "application/json" "$body"
+            fi
+            ;;
+
+        *)
+            _http_404
+            ;;
+    esac
+}
+
+api_server() {
+    local port="${1:-9099}"
+
+    # Prefer socat (supports concurrent connections via fork);
+    # fall back to a serial nc loop if socat is absent.
+    if command -v socat &>/dev/null; then
+        log_info "API server listening on port $port (socat)"
+        log_info "Endpoints: /healthz  /clusters  /clusters/<id>/status"
+        log_info "           /clusters/<id>/metrics  POST /clusters/<id>/add-node"
+        # Export everything _api_handle_request needs
+        export -f _api_handle_request _http_200 _http_404 _http_400
+        export -f emit_prometheus_metrics add_node_to_cluster add_nodes_parallel
+        export -f create_node update_cluster_status log_info log_warn log_error log_success log_debug
+        export CLUSTER_DATA_DIR DATA_DIR
+        socat TCP-LISTEN:"$port",reuseaddr,fork \
+            EXEC:"bash -c _api_handle_request",pty,raw,echo=0
+    else
+        # nc serial fallback (one request at a time — fine for demos)
+        log_warn "socat not found — using nc serial mode (install socat for concurrent requests)"
+        log_info "API server listening on port $port (nc fallback)"
+        while true; do
+            _api_handle_request | nc -l "$port" -q1 2>/dev/null || true
+        done
+    fi
 }
 
 # Run main

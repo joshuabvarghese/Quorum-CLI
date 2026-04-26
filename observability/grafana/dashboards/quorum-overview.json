@@ -1,0 +1,269 @@
+{
+  "title": "Quorum-CLI — Cluster Overview",
+  "uid": "quorum-overview",
+  "version": 1,
+  "schemaVersion": 39,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "tags": ["quorum", "cluster"],
+
+  "templating": {
+    "list": [
+      {
+        "name": "cluster",
+        "label": "Cluster",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(quorum_cluster_health, cluster)",
+        "refresh": 2,
+        "multi": false,
+        "includeAll": false,
+        "current": {}
+      }
+    ]
+  },
+
+  "panels": [
+
+    {
+      "id": 1,
+      "title": "Quorum Status",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "1": { "text": "QUORUM OK",   "color": "green"  } } },
+            { "type": "value", "options": { "0": { "text": "QUORUM LOST", "color": "red"    } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",   "value": null },
+              { "color": "green", "value": 1    }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "quorum_has_quorum{cluster=\"$cluster\"}",
+          "legendFormat": "Quorum",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ]
+    },
+
+    {
+      "id": 2,
+      "title": "Cluster Health",
+      "type": "stat",
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "1":   { "text": "HEALTHY",   "color": "green"  } } },
+            { "type": "value", "options": { "0.5": { "text": "DEGRADED",  "color": "yellow" } } },
+            { "type": "value", "options": { "0":   { "text": "UNHEALTHY", "color": "red"    } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "yellow", "value": 0.5  },
+              { "color": "green",  "value": 1    }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "quorum_cluster_health{cluster=\"$cluster\"}",
+          "legendFormat": "Health",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ]
+    },
+
+    {
+      "id": 3,
+      "title": "Nodes Up / Total",
+      "type": "stat",
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "percentage",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "yellow", "value": 50   },
+              { "color": "green",  "value": 100  }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "quorum_nodes_healthy{cluster=\"$cluster\"}",
+          "legendFormat": "Healthy",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        },
+        {
+          "expr": "quorum_nodes_total{cluster=\"$cluster\"}",
+          "legendFormat": "Total",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ]
+    },
+
+    {
+      "id": 4,
+      "title": "Leader Elections (rate 5m)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red",    "value": 0.1  }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(quorum_leader_elections_total{cluster=\"$cluster\"}[5m])",
+          "legendFormat": "Elections/s",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ]
+    },
+
+    {
+      "id": 5,
+      "title": "Node Health Over Time",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "quorum_nodes_healthy{cluster=\"$cluster\"}",
+          "legendFormat": "Healthy nodes",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        },
+        {
+          "expr": "quorum_nodes_down{cluster=\"$cluster\"}",
+          "legendFormat": "Down nodes",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        },
+        {
+          "expr": "quorum_quorum_threshold{cluster=\"$cluster\"}",
+          "legendFormat": "Quorum threshold",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ]
+    },
+
+    {
+      "id": 6,
+      "title": "Leader Election Rate Over Time",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red",    "value": 0.1  }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(quorum_leader_elections_total{cluster=\"$cluster\"}[5m])",
+          "legendFormat": "Elections/s (5m rate)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ]
+    },
+
+    {
+      "id": 7,
+      "title": "Cluster Logs (Loki)",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 12, "w": 24, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": {
+        "showTime":     true,
+        "showLabels":   true,
+        "wrapLogMessage": true,
+        "sortOrder":    "Descending",
+        "dedupStrategy": "none"
+      },
+      "targets": [
+        {
+          "expr": "{job=~\"quorum-.+\"} |= \"$cluster\"",
+          "legendFormat": "",
+          "datasource": { "type": "loki", "uid": "loki" }
+        }
+      ]
+    }
+
+  ]
+}

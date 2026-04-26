@@ -1,0 +1,117 @@
+################################################################################
+# Quorum-CLI Prometheus Alert Rules
+#
+# Reload without restart:
+#   curl -X POST http://localhost:9090/-/reload
+################################################################################
+
+groups:
+
+  - name: quorum_health
+    interval: 15s
+    rules:
+
+      # ── Quorum lost ────────────────────────────────────────────────────────
+      # Fires when quorum_has_quorum drops to 0.  This is the most critical
+      # alert: the cluster cannot process writes and is effectively unavailable.
+      - alert: QuorumLost
+        expr: quorum_has_quorum == 0
+        for: 0m      # fire immediately — no grace period for quorum loss
+        labels:
+          severity: critical
+          team:     platform
+        annotations:
+          summary:     "Quorum LOST on cluster {{ $labels.cluster }}"
+          description: >
+            Cluster {{ $labels.cluster }} ({{ $labels.id }}) has lost quorum.
+            Healthy nodes: {{ $value }} / threshold {{ $labels.quorum_threshold }}.
+            Writes are rejected.  Investigate node failures immediately.
+          runbook_url: "https://github.com/yourorg/Quorum-CLI/blob/main/RUNBOOK.md#quorum-lost"
+
+      # ── Quorum degraded (minority down but quorum still held) ─────────────
+      - alert: QuorumDegraded
+        expr: quorum_nodes_down > 0 and quorum_has_quorum == 1
+        for: 2m
+        labels:
+          severity: warning
+          team:     platform
+        annotations:
+          summary:     "Cluster {{ $labels.cluster }} degraded ({{ $value }} node(s) down)"
+          description: >
+            {{ $value }} node(s) are DOWN but quorum is still maintained.
+            Cluster is operational but fault tolerance is reduced.
+            One more node failure would cause quorum loss.
+
+      # ── All nodes down ─────────────────────────────────────────────────────
+      - alert: AllNodesDown
+        expr: quorum_nodes_healthy == 0
+        for: 0m
+        labels:
+          severity: critical
+          team:     platform
+        annotations:
+          summary:     "ALL nodes down on cluster {{ $labels.cluster }}"
+          description: >
+            Every node in cluster {{ $labels.cluster }} is reporting DOWN.
+            The cluster is completely unavailable.
+
+      # ── Cluster health gauge degraded ─────────────────────────────────────
+      - alert: ClusterHealthDegraded
+        expr: quorum_cluster_health < 1 and quorum_cluster_health > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cluster {{ $labels.cluster }} health is degraded"
+          description: >
+            quorum_cluster_health={{ $value }} (1=healthy, 0.5=degraded, 0=unhealthy).
+            Review node statuses.
+
+      # ── Cluster health unhealthy ────────────────────────────────────────
+      - alert: ClusterUnhealthy
+        expr: quorum_cluster_health == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Cluster {{ $labels.cluster }} is UNHEALTHY"
+          description: >
+            quorum_cluster_health=0 for > 1 minute.
+            Cluster is in an unhealthy state and requires immediate attention.
+
+  - name: leader_elections
+    interval: 30s
+    rules:
+
+      # ── Leader election rate spike ─────────────────────────────────────────
+      # A healthy cluster should have near-zero election rate.
+      # Frequent re-elections indicate network instability or split-brain risk.
+      - alert: LeaderElectionRateHigh
+        expr: >
+          rate(quorum_leader_elections_total[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+          team:     platform
+        annotations:
+          summary:     "High leader election rate on {{ $labels.cluster }}"
+          description: >
+            Leader elections are occurring at {{ $value | humanize }} per second
+            (threshold: 0.1/s) on cluster {{ $labels.cluster }}.
+            This may indicate network instability, clock skew, or a split-brain scenario.
+
+  - name: scrape_health
+    rules:
+
+      # ── Stale scrape ─────────────────────────────────────────────────────
+      - alert: QuorumMetricsStale
+        expr: >
+          (time() - quorum_scrape_timestamp_seconds) > 60
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Quorum metrics are stale for {{ $labels.cluster }}"
+          description: >
+            Last successful scrape was {{ $value | humanizeDuration }} ago.
+            The cluster-manager server may be down or unreachable.

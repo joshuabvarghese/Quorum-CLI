@@ -1,0 +1,56 @@
+################################################################################
+# Prometheus configuration for Quorum-CLI
+#
+# Assumes cluster-manager.sh server --port 9099 is running on the host.
+# Add additional static_configs entries for each cluster ID you want scraped.
+################################################################################
+
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: "quorum-demo"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+
+  # Self-monitoring
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Quorum-CLI cluster metrics
+  # The metrics endpoint is /clusters/<cluster_id>/metrics — use relabeling
+  # to map each cluster_id to its own scrape target path.
+  #
+  # To add a new cluster, add its ID to targets and update the relabel rule.
+  - job_name: quorum_cluster
+    scrape_interval: 10s
+    metrics_path: /healthz               # placeholder; overridden per-target
+    static_configs:
+      # Replace these with your actual cluster IDs and host:port of the
+      # cluster-manager.sh server.  host.docker.internal resolves to the
+      # Docker host on macOS/Windows; on Linux use 172.17.0.1 or the host IP.
+      - targets:
+          - "host.docker.internal:9099"
+        labels:
+          __metrics_path__: /clusters/__CLUSTER_ID__/metrics
+          cluster_id:        "__CLUSTER_ID__"
+          cluster_name:      "prod"
+
+  # Alertmanager self-scrape
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+
+  # Loki self-scrape
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]

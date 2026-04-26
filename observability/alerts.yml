@@ -1,0 +1,87 @@
+---
+# Quorum-CLI Prometheus Alert Rules
+#
+# Alert severity levels:
+#   critical  — quorum lost, cluster cannot serve writes (page immediately)
+#   warning   — degraded but quorum held (notify, don't wake on-call)
+#   info      — informational, no action required
+
+groups:
+  - name: quorum_loss
+    interval: 10s
+    rules:
+
+      # -----------------------------------------------------------------------
+      # QuorumLost: fewer healthy nodes than the threshold → writes blocked
+      # -----------------------------------------------------------------------
+      - alert: QuorumLost
+        expr: quorum_has_quorum == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Quorum lost on cluster {{ $labels.cluster }}"
+          description: >
+            Cluster {{ $labels.cluster }} ({{ $labels.id }}) has lost quorum.
+            Healthy nodes: {{ $value }}  |  Threshold: {{ quorum_quorum_threshold }}
+            Writes will be rejected until quorum is restored.
+          runbook_url: "https://github.com/your-org/Quorum-CLI/blob/main/RUNBOOK.md#quorum-loss"
+
+      # -----------------------------------------------------------------------
+      # ClusterDegraded: quorum held but at least one node is down
+      # -----------------------------------------------------------------------
+      - alert: ClusterDegraded
+        expr: quorum_cluster_health == 0.5
+        for: 60s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cluster degraded: {{ $labels.cluster }}"
+          description: >
+            Cluster {{ $labels.cluster }} is degraded.
+            {{ $labels.cluster }} nodes down: {{ quorum_nodes_down{cluster="{{ $labels.cluster }}"} }}.
+            Quorum is currently held but resilience is reduced.
+
+      # -----------------------------------------------------------------------
+      # NodeDown: any individual node has been down for > 2 min
+      # -----------------------------------------------------------------------
+      - alert: NodesDown
+        expr: quorum_nodes_down > 0
+        for: 120s
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} node(s) down in cluster {{ $labels.cluster }}"
+          description: >
+            {{ $value }} node(s) in cluster {{ $labels.cluster }} have been
+            reporting status=down for more than 2 minutes.
+
+      # -----------------------------------------------------------------------
+      # FrequentLeaderElections: election counter rising fast → instability
+      # (rate over 5m > 1 election per minute)
+      # -----------------------------------------------------------------------
+      - alert: FrequentLeaderElections
+        expr: rate(quorum_leader_elections_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Frequent leader elections in cluster {{ $labels.cluster }}"
+          description: >
+            Cluster {{ $labels.cluster }} is electing a new leader more than once
+            per minute over the last 5 minutes. This may indicate network instability
+            or an underpowered leader node.
+
+      # -----------------------------------------------------------------------
+      # ClusterUnhealthy: health gauge at 0 (majority nodes down)
+      # -----------------------------------------------------------------------
+      - alert: ClusterUnhealthy
+        expr: quorum_cluster_health == 0
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Cluster {{ $labels.cluster }} is UNHEALTHY"
+          description: >
+            Cluster {{ $labels.cluster }} health gauge is 0 — majority of nodes
+            are down. Immediate intervention required.
