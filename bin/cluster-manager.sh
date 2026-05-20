@@ -48,6 +48,8 @@ Commands:
     add-node                Add a node to cluster
     remove-node             Remove a node from cluster
     scale                   Scale cluster up/down
+    add-witness             Add a witness node to break quorum ties (even-size clusters)
+    remove-witness          Remove the witness node from a cluster
     diagnose                Run cluster diagnostics
     metrics                 Expose Prometheus-format metrics for a cluster
 
@@ -634,6 +636,22 @@ main() {
                 exit 1
             fi
             add_node_to_cluster "$cluster_id"
+            ;;
+        add-witness)
+            if [[ -z "$cluster_id" ]]; then
+                log_error "Cluster ID is required"
+                exit 1
+            fi
+            witness_id=$(add_witness_to_cluster "$cluster_id")
+            log_success "Witness node '$witness_id' added to cluster $cluster_id (force_quorum_enabled=true)"
+            ;;
+        remove-witness)
+            if [[ -z "$cluster_id" ]]; then
+                log_error "Cluster ID is required"
+                exit 1
+            fi
+            remove_witness_from_cluster "$cluster_id"
+            log_success "Witness node removed from cluster $cluster_id"
             ;;
         metrics)
             if [[ -z "$cluster_id" ]]; then

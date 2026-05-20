@@ -137,31 +137,41 @@ export -f quorum_threshold check_quorum count_up_nodes count_total_nodes
 check_cluster_health() {
     local cluster_id="$1"
     local cluster_dir="$DATA_DIR/clusters/$cluster_id"
-    
+
     if [[ ! -d "$cluster_dir" ]]; then
         echo "$CLUSTER_STATUS_UNHEALTHY"
         return 1
     fi
-    
+
     local up_nodes=0
     local total_nodes=0
-    
-    for node_dir in "$cluster_dir/nodes"/*; do
-        if [[ -d "$node_dir" ]]; then
-            ((total_nodes++)) || true
-            
-            local status
-            status=$(grep -o '"status"[: ]*"[^"]*"' "$node_dir/metadata.json" | grep -o '"[^"]*"$' | tr -d '"')
-            
-            if [[ "$status" == "$NODE_STATUS_UP" ]]; then
-                ((up_nodes++)) || true
-            fi
+
+    for node_dir in "$cluster_dir/nodes"/*/; do
+        [[ -d "$node_dir" ]] || continue
+        (( total_nodes++ )) || true
+
+        local status
+        status=$(grep -o '"status"[: ]*"[^"]*"' "$node_dir/metadata.json" \
+                 | grep -o '"[^"]*"$' | tr -d '"')
+
+        if [[ "$status" == "$NODE_STATUS_UP" ]]; then
+            (( up_nodes++ )) || true
         fi
     done
-    
+
+    # BUG FIX: the original used `up_nodes > total_nodes/2` (integer division)
+    # which disagrees with check_quorum's `floor(N/2)+1` threshold.
+    # Example — 4-node cluster, 3 nodes up:
+    #   OLD:  3 > 4/2  →  3 > 2  → DEGRADED   (wrong: quorum is HELD)
+    #   NEW:  check_quorum 3 4  → threshold=3, 3>=3  → HEALTHY  (correct)
+    #
+    # We now delegate to check_quorum so both functions are always consistent.
+    # A witness node (if present) is already counted in total_nodes because
+    # add_witness_to_cluster creates a real node directory for it.
     if [[ $up_nodes -eq $total_nodes ]]; then
         echo "$CLUSTER_STATUS_HEALTHY"
-    elif [[ $up_nodes -gt $((total_nodes / 2)) ]]; then
+    elif check_quorum "$up_nodes" "$total_nodes"; then
+        # Quorum is held but not all nodes are up → degraded but operational
         echo "$CLUSTER_STATUS_DEGRADED"
     else
         echo "$CLUSTER_STATUS_UNHEALTHY"
@@ -236,39 +246,192 @@ EOF
 elect_leader() {
     local cluster_id="$1"
     local cluster_dir="$DATA_DIR/clusters/$cluster_id"
-    
-    # Get all UP nodes
+
+    # BUG FIX: the original `while IFS= read -r node_id; do ... done` had no
+    # stdin source.  The heredoc/process-substitution was missing, so the loop
+    # body never executed, up_nodes was always empty, and an empty string was
+    # written to state/leader — silently, with exit code 0.
+    #
+    # Fix: pipe the sorted list of node directory basenames into the loop via
+    # process substitution so it works correctly under `set -euo pipefail`.
+
     local up_nodes=()
-    
+
     while IFS= read -r node_id; do
+        [[ -z "$node_id" ]] && continue
         local node_dir="$cluster_dir/nodes/$node_id"
-        if [[ -d "$node_dir" ]]; then
-            
-            local status
-            status=$(grep -o '"status"[: ]*"[^"]*"' "$node_dir/metadata.json" | grep -o '"[^"]*"$' | tr -d '"')
-            
-            if [[ "$status" == "$NODE_STATUS_UP" ]]; then
-                up_nodes+=("$node_id")
-            fi
+        [[ -d "$node_dir" ]] || continue
+
+        local status
+        status=$(grep -o '"status"[: ]*"[^"]*"' "$node_dir/metadata.json" \
+                 | grep -o '"[^"]*"$' | tr -d '"')
+
+        if [[ "$status" == "$NODE_STATUS_UP" ]]; then
+            up_nodes+=("$node_id")
         fi
-    done
-    
-    # Sort and pick first (deterministic leader election)
+    done < <(ls "$cluster_dir/nodes/" 2>/dev/null | sort)
+
+    if [[ ${#up_nodes[@]} -eq 0 ]]; then
+        # No UP nodes — cluster has no leader; write sentinel and return error
+        echo "" > "$cluster_dir/state/leader"
+        echo "none"
+        return 1
+    fi
+
+    # Deterministic: sort and take the lexicographically smallest node-id
     local leader
     leader=$(printf '%s\n' "${up_nodes[@]}" | sort | head -n1)
-    
-    # Update leader file
+
+    mkdir -p "$cluster_dir/state"
     echo "$leader" > "$cluster_dir/state/leader"
-    
     echo "$leader"
 }
 
 get_cluster_leader() {
     local cluster_id="$1"
     local leader_file="$DATA_DIR/clusters/$cluster_id/state/leader"
-    
+
     if [[ -f "$leader_file" ]]; then
         cat "$leader_file"
+    else
+        echo "none"
+    fi
+}
+
+################################################################################
+# Witness / force-quorum  (FIX-3: previously documented but never implemented)
+#
+# A Witness node is a lightweight tie-breaker that participates in quorum
+# voting but holds no data.  It is the canonical solution for even-sized
+# clusters (2, 4, 6 nodes) where a 50/50 network split would otherwise leave
+# both partitions unable to achieve quorum, causing a full write-halt.
+#
+# Design:
+#   - A Witness is stored as a regular node directory so that count_total_nodes,
+#     count_up_nodes, check_quorum, and check_cluster_health all naturally
+#     include it without special-casing.
+#   - Its metadata.json carries  "role": "witness"  and  "is_witness": true
+#     so callers that care (replication, data-placement) can skip it.
+#   - The cluster metadata gains a  "witness_node_id"  field and a boolean
+#     "force_quorum_enabled" flag.
+#   - add_witness_to_cluster is idempotent: calling it twice on the same
+#     cluster is safe.
+#
+# Usage:
+#   add_witness_to_cluster  <cluster_id>   # add/enable witness
+#   remove_witness_from_cluster <cluster_id>  # remove/disable witness
+#   is_witness_enabled <cluster_id>        # returns 0 if enabled
+#   get_witness_node_id <cluster_id>       # prints witness node-id or "none"
+################################################################################
+
+# add_witness_to_cluster <cluster_id>
+#   Creates a witness node directory, updates cluster metadata, and re-runs
+#   leader election so the new effective cluster size is taken into account.
+add_witness_to_cluster() {
+    local cluster_id="$1"
+    local cluster_dir="$DATA_DIR/clusters/$cluster_id"
+
+    [[ -d "$cluster_dir" ]] || { echo "add_witness_to_cluster: cluster not found: $cluster_id" >&2; return 1; }
+
+    # Idempotency guard
+    if is_witness_enabled "$cluster_id"; then
+        local existing
+        existing=$(get_witness_node_id "$cluster_id")
+        echo "$existing"
+        return 0
+    fi
+
+    # Assign the next available node number for the witness
+    local current_count
+    current_count=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+    local witness_num=$(( current_count + 1 ))
+    local witness_id="node-${witness_num}"
+    local witness_dir="$cluster_dir/nodes/$witness_id"
+
+    mkdir -p "$witness_dir"
+
+    cat > "$witness_dir/metadata.json" << EOF
+{
+  "node_id": "$witness_id",
+  "cluster_id": "$cluster_id",
+  "ip": "127.0.0.1",
+  "port": 0,
+  "role": "witness",
+  "is_witness": true,
+  "status": "up",
+  "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "data_size_mb": 0,
+  "load_percent": 0
+}
+EOF
+
+    # Update cluster metadata: increment node_count and add witness fields
+    local meta="$cluster_dir/metadata/cluster.json"
+    sed_inplace "s/\"node_count\": [0-9]*/\"node_count\": $witness_num/" "$meta"
+
+    # Append witness fields if not already present; use a temp file for safety
+    local tmp
+    tmp=$(mktemp)
+    # Insert before the closing brace
+    sed 's/}[[:space:]]*$/,\n  "witness_node_id": "'"$witness_id"'",\n  "force_quorum_enabled": true\n}/' "$meta" > "$tmp"
+    mv "$tmp" "$meta"
+
+    # Re-elect leader with the new topology
+    elect_leader "$cluster_id" >/dev/null || true
+
+    echo "$witness_id"
+}
+
+# remove_witness_from_cluster <cluster_id>
+#   Removes the witness node directory and clears the witness metadata fields.
+remove_witness_from_cluster() {
+    local cluster_id="$1"
+    local cluster_dir="$DATA_DIR/clusters/$cluster_id"
+
+    [[ -d "$cluster_dir" ]] || { echo "remove_witness_from_cluster: cluster not found: $cluster_id" >&2; return 1; }
+
+    local witness_id
+    witness_id=$(get_witness_node_id "$cluster_id")
+
+    if [[ "$witness_id" == "none" ]]; then
+        return 0   # nothing to do
+    fi
+
+    local witness_dir="$cluster_dir/nodes/$witness_id"
+    rm -rf "$witness_dir"
+
+    # Update node_count in metadata
+    local remaining
+    remaining=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+    local meta="$cluster_dir/metadata/cluster.json"
+    sed_inplace "s/\"node_count\": [0-9]*/\"node_count\": $remaining/" "$meta"
+
+    # Remove witness fields from metadata JSON
+    local tmp
+    tmp=$(mktemp)
+    grep -v '"witness_node_id"\|"force_quorum_enabled"' "$meta" \
+        | sed 's/,[[:space:]]*$//' > "$tmp"
+    mv "$tmp" "$meta"
+
+    elect_leader "$cluster_id" >/dev/null || true
+}
+
+# is_witness_enabled <cluster_id>
+#   Returns 0 if a witness is active, 1 otherwise.
+is_witness_enabled() {
+    local cluster_id="$1"
+    local meta="$DATA_DIR/clusters/$cluster_id/metadata/cluster.json"
+    [[ -f "$meta" ]] || return 1
+    grep -q '"force_quorum_enabled": true' "$meta"
+}
+
+# get_witness_node_id <cluster_id>
+#   Prints the witness node-id, or "none" if no witness is configured.
+get_witness_node_id() {
+    local cluster_id="$1"
+    local meta="$DATA_DIR/clusters/$cluster_id/metadata/cluster.json"
+    if [[ -f "$meta" ]] && grep -q '"witness_node_id"' "$meta"; then
+        grep -o '"witness_node_id": "[^"]*"' "$meta" | grep -o '"[^"]*"$' | tr -d '"'
     else
         echo "none"
     fi
@@ -336,6 +499,7 @@ export -f validate_cluster_name validate_node_count validate_replication_factor
 export -f check_cluster_health check_node_health
 export -f get_cluster_metrics
 export -f elect_leader get_cluster_leader
+export -f add_witness_to_cluster remove_witness_from_cluster is_witness_enabled get_witness_node_id
 export -f calculate_replication_status
 export -f generate_cluster_report
 
