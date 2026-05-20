@@ -379,46 +379,60 @@ list_clusters() {
 update_cluster_status() {
     local cluster_id="$1"
     local new_status="$2"
-    
+
     local metadata_file="$CLUSTER_DATA_DIR/$cluster_id/metadata/cluster.json"
-    
-    # Use sed to update status
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS
-        sed -i '' "s/\"status\": \"[^\"]*\"/\"status\": \"$new_status\"/" "$metadata_file"
-    else
-        # Linux
-        sed -i "s/\"status\": \"[^\"]*\"/\"status\": \"$new_status\"/" "$metadata_file"
-    fi
+
+    # Use the portable sed_inplace helper (defined in cluster-lib.sh).
+    # The raw `sed -i '' || sed -i` fallback is unsafe — see sed_inplace for details.
+    sed_inplace "s/\"status\": \"[^\"]*\"/\"status\": \"$new_status\"/" "$metadata_file"
 }
 
 add_node_to_cluster() {
     local cluster_id="$1"
-    
+
     if [[ ! -d "$CLUSTER_DATA_DIR/$cluster_id" ]]; then
         log_error "Cluster not found: $cluster_id"
         return 1
     fi
-    
+
     local cluster_dir="$CLUSTER_DATA_DIR/$cluster_id"
     local current_nodes
     current_nodes=$(find "$cluster_dir/nodes" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
     local new_node_num
     new_node_num=$((current_nodes + 1))
-    
-    log_info "Adding node-$new_node_num to cluster $cluster_id..."
-    
-    # Create new node
-    create_node "$cluster_id" "$new_node_num" "cassandra" "$((7000 + new_node_num))"
-    
-    # Update cluster metadata
+    local node_dir="$cluster_dir/nodes/node-$new_node_num"
     local metadata_file="$cluster_dir/metadata/cluster.json"
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s/\"node_count\": [0-9]*/\"node_count\": $new_node_num/" "$metadata_file"
-    else
-        sed -i "s/\"node_count\": [0-9]*/\"node_count\": $new_node_num/" "$metadata_file"
+
+    log_info "Adding node-$new_node_num to cluster $cluster_id..."
+
+    # ------------------------------------------------------------------
+    # Step 1 — create the node directory and metadata.
+    # ------------------------------------------------------------------
+    create_node "$cluster_id" "$new_node_num" "cassandra" "$((7000 + new_node_num))"
+
+    # ------------------------------------------------------------------
+    # Step 2 — update the JSON counter.
+    # If this fails (disk full, read-only file, wrong OS sed, etc.) we
+    # immediately remove the directory we just created so the filesystem
+    # node count and the JSON counter stay in agreement.
+    #
+    # We temporarily suspend errexit (set +e) around the sed call so the
+    # script does not terminate before we can capture the exit code and
+    # perform the rollback.  errexit is restored immediately after.
+    # ------------------------------------------------------------------
+    local _sed_rc
+    set +e
+    sed_inplace "s/\"node_count\": [0-9]*/\"node_count\": $new_node_num/" "$metadata_file"
+    _sed_rc=$?
+    set -e
+
+    if [[ $_sed_rc -ne 0 ]]; then
+        log_warn "Metadata update failed (exit $_sed_rc) — rolling back: removing $node_dir"
+        rm -rf "$node_dir"
+        log_error "add-node aborted; cluster is unchanged"
+        return 1
     fi
-    
+
     log_success "Node added successfully! Total nodes: $new_node_num"
 }
 

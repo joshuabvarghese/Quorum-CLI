@@ -338,3 +338,33 @@ export -f get_cluster_metrics
 export -f elect_leader get_cluster_leader
 export -f calculate_replication_status
 export -f generate_cluster_report
+
+################################################################################
+# sed_inplace <pattern> <file>
+#
+# Portable in-place sed that works on both macOS (BSD sed) and Linux (GNU sed).
+#
+# The `sed -i '' ... || sed -i ...` fallback is NOT safe:
+#   - On some GNU sed versions, passing '' as the extension does not error —
+#     it silently writes a backup file literally named '' beside the target,
+#     leaves the original unchanged, and exits 0.  The metadata update then
+#     never happens, and the caller never knows.
+#
+# This wrapper detects the OS once and dispatches to the correct form.
+# Every destructive sed call in the project must go through this function.
+################################################################################
+sed_inplace() {
+    local pattern="$1"
+    local file="$2"
+
+    if [[ ! -f "$file" ]]; then
+        echo "sed_inplace: file not found: $file" >&2
+        return 1
+    fi
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "$pattern" "$file"
+    else
+        sed -i "$pattern" "$file"
+    fi
+}
