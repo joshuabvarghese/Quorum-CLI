@@ -1,6 +1,6 @@
 # Quorum CLI
 
-A command-line toolset for managing distributed storage clusters: replication, quorum consensus, failure injection, and monitoring, built entirely with Bash and standard Linux tools (no Cassandra, Kafka, or other binary dependency — node behavior is simulated on top of plain files and processes).
+A command-line toolset for managing distributed storage clusters: replication, quorum consensus, failure injection, and monitoring, built entirely with Bash and standard Linux tools
 
 ## Overview
 
