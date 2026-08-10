@@ -42,16 +42,14 @@ Usage: $(basename "$0") <command> [options]
 Commands:
     init                    Initialize the cluster management system
     create                  Create a new cluster
-    destroy                 Destroy a cluster
     status                  Show cluster status
     list                    List all clusters
     add-node                Add a node to cluster
-    remove-node             Remove a node from cluster
-    scale                   Scale cluster up/down
     add-witness             Add a witness node to break quorum ties (even-size clusters)
     remove-witness          Remove the witness node from a cluster
-    diagnose                Run cluster diagnostics
     metrics                 Expose Prometheus-format metrics for a cluster
+    nodetool-status         Cassandra nodetool-style ring view
+    token-ranges            Print token range ownership
 
 Options:
     --name <name>           Cluster name
@@ -61,6 +59,8 @@ Options:
     --node-id <id>          Node ID
     --replication-factor <n> Replication factor (default: 3)
     --verbose               Verbose output
+    --dry-run               Preview a command without making changes (create only)
+    --force-quorum          On create, add a Witness node if --nodes is even
     --help                  Show this help
 
 Examples:
@@ -71,7 +71,7 @@ Examples:
     $(basename "$0") scale --cluster-id cls-001 --nodes 5
 
 EOF
-    exit 0
+    exit "${1:-0}"
 }
 
 initialize_system() {
@@ -103,9 +103,29 @@ create_cluster() {
     local node_count="$2"
     local cluster_type="${3:-cassandra}"
     local replication_factor="${4:-3}"
+    local dry_run="${5:-false}"
+    local force_quorum="${6:-false}"
     
     log_info "Creating cluster: $cluster_name"
     log_info "Type: $cluster_type, Nodes: $node_count, Replication: $replication_factor"
+
+    if [[ "$node_count" -gt 0 ]] && (( node_count % 2 == 0 )); then
+        log_warn "Even node count ($node_count) detected — a 50/50 split cannot reach quorum."
+        if [[ "$force_quorum" != "true" ]]; then
+            log_warn "Consider --force-quorum to add a tie-breaking Witness node, or add-witness after creation."
+        fi
+    fi
+
+    if [[ "$dry_run" == "true" ]]; then
+        log_warn "DRY-RUN: Would create cluster '$cluster_name' ($cluster_type, $node_count nodes, replication=$replication_factor)"
+        [[ "$force_quorum" == "true" ]] && log_warn "DRY-RUN: Would add a Witness node (--force-quorum)"
+        log_warn "DRY-RUN: No files created."
+        echo ""
+        echo "Cluster name: $cluster_name (dry-run — not persisted)"
+        echo "Nodes: $node_count"
+        echo "Type: $cluster_type"
+        return 0
+    fi
     
     # Generate cluster ID
     local cluster_id
@@ -139,6 +159,12 @@ EOF
     
     # Update cluster status
     update_cluster_status "$cluster_id" "healthy"
+
+    local witness_id=""
+    if [[ "$force_quorum" == "true" ]]; then
+        witness_id=$(add_witness_to_cluster "$cluster_id")
+        log_success "--force-quorum: Witness node '$witness_id' added as tie-breaker"
+    fi
     
     log_success "Cluster created successfully!"
     echo ""
@@ -147,6 +173,7 @@ EOF
     echo "Name: $cluster_name"
     echo "Nodes: $node_count"
     echo "Type: $cluster_type"
+    [[ -n "$witness_id" ]] && echo "Witness: $witness_id (force_quorum_enabled=true)"
     echo ""
     echo "View status with: $(basename "$0") status --cluster-id $cluster_id"
 }
@@ -307,7 +334,7 @@ colorize_status() {
             echo "$(tput setaf 3)$(echo "$status" | tr "[:lower:]" "[:upper:]")$(tput sgr0)"
             ;;
         *)
-            echo "$(echo "$status" | tr "[:lower:]" "[:upper:]")"
+            echo "$status" | tr "[:lower:]" "[:upper:]"
             ;;
     esac
 }
@@ -376,17 +403,6 @@ list_clusters() {
     done
     
     echo ""
-}
-
-update_cluster_status() {
-    local cluster_id="$1"
-    local new_status="$2"
-
-    local metadata_file="$CLUSTER_DATA_DIR/$cluster_id/metadata/cluster.json"
-
-    # Use the portable sed_inplace helper (defined in cluster-lib.sh).
-    # The raw `sed -i '' || sed -i` fallback is unsafe — see sed_inplace for details.
-    sed_inplace "s/\"status\": \"[^\"]*\"/\"status\": \"$new_status\"/" "$metadata_file"
 }
 
 add_node_to_cluster() {
@@ -487,7 +503,9 @@ emit_prometheus_metrics() {
         local nstatus
         nstatus=$(grep -o '"status": "[^"]*"' "$node_dir/metadata.json" \
                   | grep -o '"[^"]*"$' | tr -d '"')
-        [[ "$nstatus" == "up" ]] && (( healthy_nodes++ )) || true
+        if [[ "$nstatus" == "up" ]]; then
+            (( healthy_nodes++ )) || true
+        fi
     done
 
     # Derive health gauge: 1=healthy, 0.5=degraded, 0=unhealthy
@@ -571,6 +589,8 @@ main() {
     local cluster_id=""
     local replication_factor=3
     local verbose=false
+    local dry_run=false
+    local force_quorum=false
     
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -598,12 +618,20 @@ main() {
                 verbose=true
                 shift
                 ;;
+            --dry-run)
+                dry_run=true
+                shift
+                ;;
+            --force-quorum)
+                force_quorum=true
+                shift
+                ;;
             --help)
                 show_usage
                 ;;
             *)
                 log_error "Unknown option: $1"
-                show_usage
+                show_usage 1
                 ;;
         esac
     done
@@ -616,9 +644,9 @@ main() {
         create)
             if [[ -z "$cluster_name" ]]; then
                 log_error "Cluster name is required"
-                show_usage
+                show_usage 1
             fi
-            create_cluster "$cluster_name" "$node_count" "$cluster_type" "$replication_factor"
+            create_cluster "$cluster_name" "$node_count" "$cluster_type" "$replication_factor" "$dry_run" "$force_quorum"
             ;;
         status)
             if [[ -z "$cluster_id" ]]; then
@@ -676,7 +704,7 @@ main() {
             ;;
         *)
             log_error "Unknown command: $command"
-            show_usage
+            show_usage 1
             ;;
     esac
 }

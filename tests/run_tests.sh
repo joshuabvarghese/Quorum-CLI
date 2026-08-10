@@ -32,8 +32,12 @@ TESTS_FAILED=0
 FAILED_NAMES=()
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-_pass() { (( TESTS_PASSED++ )); (( TESTS_RUN++ )); echo -e "  ${GREEN}✓${RESET} $1"; }
-_fail() { (( TESTS_FAILED++ )); (( TESTS_RUN++ )); echo -e "  ${RED}✗${RESET} $1"; FAILED_NAMES+=("$1"); }
+# The `|| true` on each counter guards a classic set -e trap: `(( x++ ))`
+# evaluates to the *pre-increment* value, so the first call (0 -> 1) returns
+# 0 and reads as a failed command. Without the guard, the first-ever _fail()
+# call in a run would die right there, silently, before printing anything.
+_pass() { (( TESTS_PASSED++ )) || true; (( TESTS_RUN++ )) || true; echo -e "  ${GREEN}✓${RESET} $1"; }
+_fail() { (( TESTS_FAILED++ )) || true; (( TESTS_RUN++ )) || true; echo -e "  ${RED}✗${RESET} $1"; FAILED_NAMES+=("$1"); }
 
 assert_eq()    { [[ "$1" == "$2" ]] && _pass "$3" || _fail "$3 (got '$1', expected '$2')"; }
 assert_zero()  { [[ "$1" -eq 0  ]] && _pass "$2" || _fail "$2 (exit code: $1)"; }
@@ -78,7 +82,7 @@ else
     for script in "${SCRIPTS[@]}"; do
         path="$PROJECT_ROOT/$script"
         if [[ -f "$path" ]]; then
-            if shellcheck "$path" 2>/dev/null; then
+            if shellcheck -x "$path" 2>/dev/null; then
                 _pass "shellcheck: $script"
             else
                 _fail "shellcheck: $script"
@@ -166,6 +170,8 @@ VOL_ID=$(echo "$PROV_OUT" | grep -o 'vol-[a-zA-Z0-9_-]*' | head -1)
 
 # list
 LIST_OUT=$(bash "$PROJECT_ROOT/bin/storage-ops.sh" list 2>/dev/null)
+assert_contains "$LIST_OUT" "$VOL_ID" "list: shows the volume just provisioned"
+
 STATS_OUT=$(bash "$PROJECT_ROOT/bin/storage-ops.sh" stats 2>/dev/null)
 [[ -n "$STATS_OUT" ]] && _pass "stats: produces output" || _fail "stats: produces output"
 
@@ -219,7 +225,7 @@ if declare -f log_json &>/dev/null 2>&1; then
         assert_contains "$LINE" '"level"'     "log_json: has level field"
         assert_contains "$LINE" '"message"'   "log_json: has message field"
         assert_contains "$LINE" '"timestamp"' "log_json: has timestamp field"
-        assert_contains "$LINE" "^{"          "log_json: output is a JSON object"
+        assert_contains "$LINE" "^\\{"        "log_json: output is a JSON object"
     else
         echo -e "  ${YELLOW}[INFO] log_json defined but produced no output — check JSON_LOG_FILE env${RESET}"
     fi

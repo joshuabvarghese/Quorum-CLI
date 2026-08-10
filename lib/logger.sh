@@ -32,9 +32,51 @@ LOG_LEVEL=${LOG_LEVEL:-$LOG_LEVEL_INFO}
 # Log file (can be overridden)
 LOG_FILE=${LOG_FILE:-"/tmp/cluster-manager.log"}
 
+# JSON log file (can be overridden). Derived from LOG_FILE so
+# logs/cluster/cluster-manager.log gets a logs/cluster/cluster-manager.json.log
+# sibling automatically. Left unset for LOG_FILE=/dev/null (tests, --quiet
+# runs) so _log doesn't try to write a stray "/dev/null.json.log".
+if [[ -n "$LOG_FILE" && "$LOG_FILE" != "/dev/null" ]]; then
+    JSON_LOG_FILE=${JSON_LOG_FILE:-"${LOG_FILE%.log}.json.log"}
+else
+    JSON_LOG_FILE=${JSON_LOG_FILE:-}
+fi
+
 ################################################################################
 # Logging functions
 ################################################################################
+
+# json_escape <string>
+#   Escapes backslashes and double quotes for embedding in a JSON string.
+#   Not a full JSON encoder — log messages don't carry control characters
+#   or unicode escapes, so this covers what actually shows up in practice.
+json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    printf '%s' "$s"
+}
+
+# log_json <level> <message...>
+#   Appends one line of {"timestamp","level","message"} to JSON_LOG_FILE.
+#   Timestamp is UTC ISO-8601 (2026-02-22T10:00:00Z), independent of the
+#   local-time format used in the plain-text log. Safe to call even when
+#   JSON_LOG_FILE is unset or unwritable — never trips set -e.
+log_json() {
+    local level="$1"
+    shift
+    local message="$*"
+
+    [[ -n "${JSON_LOG_FILE:-}" ]] || return 0
+
+    local timestamp
+    timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+    local escaped
+    escaped=$(json_escape "$message")
+
+    { echo "{\"timestamp\":\"${timestamp}\",\"level\":\"${level}\",\"message\":\"${escaped}\"}" >> "$JSON_LOG_FILE"; } 2>/dev/null || true
+}
 
 _log() {
     local level="$1"
@@ -58,6 +100,9 @@ _log() {
     if [[ -n "$LOG_FILE" ]]; then
         echo "[${timestamp}] [${level}] ${message}" >> "$LOG_FILE"
     fi
+
+    # Structured JSON sibling — same event, machine-readable
+    log_json "${level% }" "$message"
 }
 
 log_debug() {
@@ -87,7 +132,7 @@ log_success() {
 show_spinner() {
     local pid=$1
     local message="${2:-Processing}"
-    local spinstr; spinstr='|/-\\'
+    local spinstr='/-\|'
     
     while kill -0 "$pid" 2>/dev/null; do
         local temp=${spinstr#?}
@@ -136,5 +181,6 @@ log_separator() {
 
 # Export functions
 export -f log_debug log_info log_warn log_error log_success
+export -f json_escape log_json
 export -f show_spinner show_progress_bar
 export -f log_section log_separator

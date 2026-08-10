@@ -55,8 +55,9 @@ _create_and_get_id() {
     # Create cluster and capture output
     output=$(DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" create --name "$name" --nodes "$nodes" 2>&1)
     
-    # Extract cluster ID from output
-    echo "$output" | grep -i "cluster.*id" | grep -o '[a-f0-9]\{8\}-[a-f0-9]\{4\}-[a-f0-9]\{4\}-[a-f0-9]\{4\}-[a-f0-9]\{12\}' | head -1
+    # Extract cluster ID from output. Real IDs look like cls-1785645726-6514eb
+    # (see create_cluster() in bin/cluster-manager.sh) — not a UUID.
+    echo "$output" | grep -i "cluster.*id" | grep -o 'cls-[0-9]\+-[a-f0-9]\+' | head -1
 }
 
 # ---------------------------------------------------------------------------
@@ -69,7 +70,7 @@ _create_and_get_id() {
         skip "cluster-manager.sh not found"
     fi
     
-    run DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" init
+    run env DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" init
     [ "$status" -eq 0 ] || {
         echo "Failed with output: $output"
         return 1
@@ -89,7 +90,7 @@ _create_and_get_id() {
         skip "cluster-manager.sh not found"
     fi
     
-    run DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" create --nodes 3
+    run env DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" create --nodes 3
     [ "$status" -ne 0 ]
 }
 
@@ -105,7 +106,7 @@ _create_and_get_id() {
     if [ -z "$cluster_id" ]; then
         # Try to create without helper to see error
         DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" init >/dev/null 2>&1 || true
-        run DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" create --name "ci-cluster" --nodes 3
+        run env DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" create --name "ci-cluster" --nodes 3
         echo "Create failed with: $output"
         [ -n "$cluster_id" ]
     fi
@@ -232,7 +233,7 @@ _create_and_get_id() {
         skip "cluster-manager.sh not found"
     fi
     
-    run DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" list
+    run env DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" list
     [ "$status" -eq 0 ]
     [[ "$output" =~ [Nn]o[[:space:]]+clusters ]] || [[ "$output" =~ [Ee]mpty ]]
 }
@@ -244,7 +245,7 @@ _create_and_get_id() {
     
     _create_and_get_id "list-test" 3 >/dev/null
 
-    run DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" list
+    run env DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" list
     [ "$status" -eq 0 ]
     [[ "$output" =~ list-test ]]
 }
@@ -258,7 +259,7 @@ _create_and_get_id() {
         skip "cluster-manager.sh not found"
     fi
     
-    run DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" status --cluster-id "does-not-exist-$(date +%s)"
+    run env DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" status --cluster-id "does-not-exist-$(date +%s)"
     [ "$status" -ne 0 ]
 }
 
@@ -267,7 +268,7 @@ _create_and_get_id() {
         skip "cluster-manager.sh not found"
     fi
     
-    run DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" status
+    run env DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" status
     [ "$status" -ne 0 ]
 }
 
@@ -280,7 +281,7 @@ _create_and_get_id() {
     cluster_id=$(_create_and_get_id "status-test" 3)
     [ -n "$cluster_id" ] || skip "Failed to create cluster"
 
-    run DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" status --cluster-id "$cluster_id"
+    run env DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" status --cluster-id "$cluster_id"
     [ "$status" -eq 0 ]
     [[ "$output" =~ [Hh]ealthy ]] || [[ "$output" =~ [Hh]EALTHY ]]
 }
@@ -320,7 +321,7 @@ _create_and_get_id() {
         skip "cluster-manager.sh not found"
     fi
     
-    run DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" add-node --cluster-id "no-such-cluster-$(date +%s)"
+    run env DATA_DIR="$TEST_DATA_DIR" bash "$CLUSTER_MANAGER" add-node --cluster-id "no-such-cluster-$(date +%s)"
     [ "$status" -ne 0 ]
 }
 

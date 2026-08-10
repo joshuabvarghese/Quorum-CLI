@@ -1,8 +1,8 @@
-# Demo Walkthrough - What You'll See
+# Demo walkthrough — what you'll see
 
-This document shows you EXACTLY what the demo displays step-by-step.
+This document shows what `./scripts/demo.sh` displays, step by step.
 
-## 🎬 Demo Opening Screen
+## Demo opening screen
 
 ```
 ╔══════════════════════════════════════════════════════════════════╗
@@ -451,7 +451,7 @@ Nodes:
 
 ---
 
-## 🎉 Demo Complete!
+## Demo complete
 
 ```
 ╔══════════════════════════════════════════════════════════════════╗
@@ -487,60 +487,63 @@ Demo completed successfully!
 
 ## New Features Demo
 
-### Dry-Run Mode
+### Dry-run mode
 ```
 >>> Previewing a cluster create without making changes...
 
 Command: ./bin/cluster-manager.sh create --name prod --nodes 5 --dry-run
 
-[WARN ] 🔍 DRY-RUN mode enabled — no changes will be made.
-  [DRY-RUN] Would execute: Create cluster directory structure
-            Command: mkdir -p /data/clusters/cls-xxx/{nodes,metadata,state}
-  [DRY-RUN] Would execute: Write cluster metadata
-  [DRY-RUN] Would execute: Create node-1 directories
-  [DRY-RUN] Would execute: Create node-2 directories
-  ...
+[INFO ] Creating cluster: prod
+[INFO ] Type: cassandra, Nodes: 5, Replication: 3
+[WARN ] DRY-RUN: Would create cluster 'prod' (cassandra, 5 nodes, replication=3)
+[WARN ] DRY-RUN: No files created.
+
+Cluster name: prod (dry-run — not persisted)
+Nodes: 5
+Type: cassandra
 ```
 
-### Force Quorum / Witness Node
+### Force quorum / witness node
 ```
 >>> Creating a 2-node cluster with witness tie-breaker...
 
 Command: ./bin/cluster-manager.sh create --name two-node --nodes 2 --force-quorum
 
-[WARN ] Even node count (2) detected — quorum is not guaranteed on split.
-[INFO ] 🗳️  --force-quorum: spinning up Witness node as tie-breaker (+1 vote, no data).
-[INFO ] Provisioning 2 data nodes...
-[INFO ] 🗳️  Creating Witness node (witness-3, vote-only, no data storage)
+[INFO ] Creating cluster: two-node
+[INFO ] Type: cassandra, Nodes: 2, Replication: 3
+[WARN ] Even node count (2) detected — a 50/50 split cannot reach quorum.
+[INFO ] Provisioning 2 nodes...
+[SUCCESS] --force-quorum: Witness node 'node-3' added as tie-breaker
 [SUCCESS] Cluster created successfully!
 
-Nodes: 2 + 1 witness (quorum tie-breaker)
+Cluster ID: cls-1785660112-a41c9e
+Witness: node-3 (force_quorum_enabled=true)
 ```
 
-### iptables Network Partition
+### Network partition (iptables)
 ```
->>> Partitioning node 192.168.1.102 from cluster via iptables...
+>>> Partitioning node 192.168.1.102 from cluster...
 
 Command: ./scripts/chaos-engineering.sh partition --target-node 192.168.1.102
 
-[WARN ] 🚨 Partitioning 192.168.1.102 from the cluster...
-[INFO ] Cluster IPs in scope: 192.168.1.0/24
-  ssh 192.168.1.102 "sudo iptables -A INPUT  -s 192.168.1.0/24 -j DROP"
-  ssh 192.168.1.102 "sudo iptables -A OUTPUT -d 192.168.1.0/24 -j DROP"
+[WARN] CHAOS: Creating network partition for 192.168.1.102
+[WARN] apply iptables DROP rule for 192.168.1.0/24 (would run: ssh 192.168.1.102 sudo iptables -A INPUT -s 192.168.1.0/24 -j DROP)
+```
+This scenario currently prints the SSH/iptables command it would run rather than executing it — see README "Engineering notes" #5. For a partition that actually changes cluster state end to end, use `network-partition`, which simulates the same effect in local state:
+```
+>>> Simulating a partition between node groups (1,2) and (3)...
 
-[WARN ] Node 192.168.1.102 is now ISOLATED from the cluster.
+Command: ./scripts/chaos-engineering.sh network-partition --cluster-id cls-001 --partition "1,2" "3"
 
-  What happens next (quorum math):
-    • Remaining nodes form majority → keep accepting writes
-    • Partitioned node (192.168.1.102) detects heartbeat loss → enters read-only mode
-    • Leader re-election is triggered in the majority partition
+[WARN] CHAOS: Simulating network partition — group A: 1,2 | group B: 3
+[SUCCESS] Partition simulated. Group A retains quorum (2/3); group B does not.
 ```
 
-### JSON Structured Logging
+### JSON structured logging
 ```bash
-$ tail -f logs/cluster/cluster-manager.json.log
-{"timestamp":"2026-02-22T10:00:01Z","level":"INFO ","message":"Initializing cluster management system..."}
-{"timestamp":"2026-02-22T10:00:01Z","level":"INFO ","message":"Created default cluster configuration"}
-{"timestamp":"2026-02-22T10:00:01Z","level":"SUCCESS","message":"System initialized successfully"}
-{"timestamp":"2026-02-22T10:00:05Z","level":"INFO ","message":"Creating cluster: prod-cluster"}
+$ tail -4 logs/cluster/cluster-manager.json.log
+{"timestamp":"2026-08-09T06:42:01Z","level":"INFO","message":"Initializing cluster management system..."}
+{"timestamp":"2026-08-09T06:42:01Z","level":"SUCCESS","message":"System initialized successfully"}
+{"timestamp":"2026-08-09T06:42:05Z","level":"INFO","message":"Creating cluster: prod-cluster"}
+{"timestamp":"2026-08-09T06:42:06Z","level":"SUCCESS","message":"Cluster created successfully!"}
 ```

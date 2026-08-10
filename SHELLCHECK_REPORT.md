@@ -196,3 +196,11 @@ jobs:
 
 *Report generated: 2026-02-22*  
 *All scripts re-audited after each fix to prevent regressions.*
+
+---
+
+## Addendum (re-audit)
+
+Re-ran `shellcheck -x` against all 8 scripts listed above. Four findings had crept back in since the report above was written: a useless-echo in `cluster-manager.sh`, an `A && B || C` construct flagged by SC2015 in the same file, an `ls`-vs-`find` warning in `cluster-lib.sh`, and a spinner string in `logger.sh` where an over-escaped backslash was silently adding a fifth frame to what should've been a 4-character `|/-\` cycle. All four are fixed and `shellcheck -x` is clean across all 8 scripts as of this pass.
+
+One correction to the fix log above: the `SC2029` example (`ssh "$target_node" "sudo iptables ..."` with a disable comment) doesn't match anything currently in `scripts/chaos-engineering.sh` — the `partition` scenario there constructs and prints the SSH/iptables command rather than calling `ssh` directly, so there's nothing to disable that warning on. Worth knowing if you're using this report as a changelog rather than a point-in-time audit.

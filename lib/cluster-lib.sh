@@ -4,6 +4,12 @@
 # Cluster Library - Utility functions for cluster management
 ################################################################################
 
+# Guard against double-sourcing (readonly constants below would otherwise
+# throw "readonly variable" on a second `source` in the same shell — this
+# bit several BATS tests that source the library more than once per process)
+[[ -n "${_CLUSTER_LIB_SH_SOURCED:-}" ]] && return 0
+readonly _CLUSTER_LIB_SH_SOURCED=1
+
 # Cluster state constants
 readonly CLUSTER_STATUS_HEALTHY="healthy"
 readonly CLUSTER_STATUS_DEGRADED="degraded"
@@ -269,7 +275,7 @@ elect_leader() {
         if [[ "$status" == "$NODE_STATUS_UP" ]]; then
             up_nodes+=("$node_id")
         fi
-    done < <(ls "$cluster_dir/nodes/" 2>/dev/null | sort)
+    done < <(find "$cluster_dir/nodes/" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | sort)
 
     if [[ ${#up_nodes[@]} -eq 0 ]]; then
         # No UP nodes — cluster has no leader; write sentinel and return error
@@ -532,3 +538,20 @@ sed_inplace() {
         sed -i "$pattern" "$file"
     fi
 }
+
+# update_cluster_status <cluster_id> <new_status>
+#   Flips the top-level "status" field in a cluster's metadata/cluster.json.
+#   Moved here from bin/cluster-manager.sh — it only touches CLUSTER_DATA_DIR
+#   and sed_inplace, both already library-level, and callers that just need
+#   this one mutation shouldn't have to source the whole cluster-manager.sh
+#   entrypoint (which runs main() on load) to get it.
+update_cluster_status() {
+    local cluster_id="$1"
+    local new_status="$2"
+
+    local metadata_file="$CLUSTER_DATA_DIR/$cluster_id/metadata/cluster.json"
+
+    sed_inplace "s/\"status\": \"[^\"]*\"/\"status\": \"$new_status\"/" "$metadata_file"
+}
+
+export -f sed_inplace update_cluster_status

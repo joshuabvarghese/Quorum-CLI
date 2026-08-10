@@ -246,13 +246,17 @@ Split-brain warning appears in logs.
 
 **Detection:**
 ```bash
-# Check for active iptables DROP rules
+# Check whether iptables DROP rules are active against a specific host
 bash -c "
   source lib/logger.sh
   source lib/network_checks.sh
-  list_active_partition_rules 192.168.1.0/24
+  if check_iptables_rules 192.168.1.102; then
+    echo 'DROP rule active against 192.168.1.102'
+  else
+    echo 'No DROP rule found (or host unreachable to check)'
+  fi
 "
-# If rules are listed, a partition was deliberately or accidentally created.
+# Exit status tells you whether a partition was deliberately or accidentally created.
 ```
 
 **Resolution:**
@@ -286,16 +290,17 @@ Every script with side effects supports `--dry-run`. This mode:
 - Does NOT execute any iptables rules
 
 **Standard operating procedure:** Always run `--dry-run` before any command
-on a production cluster.
+on a production cluster. This matters most for commands that actually mutate
+state — `create`, `add-node`, `kill-node`, `network-partition`. `partition`/
+`heal-partition` specifically only ever print the SSH/iptables command they'd
+run (see README "Engineering notes" #5); the example below is still the right
+habit for when that wiring lands.
 
 ```bash
-# WRONG (runs immediately)
-./scripts/chaos-engineering.sh partition --target-node 192.168.1.102
-
-# RIGHT (preview first)
-./scripts/chaos-engineering.sh partition --target-node 192.168.1.102 --dry-run
-# Read the output, confirm correct node/CIDR
-./scripts/chaos-engineering.sh partition --target-node 192.168.1.102
+# Preview first, on every command that writes state
+./scripts/chaos-engineering.sh kill-node --cluster-id cls-001 --node-id node-2 --dry-run
+# Read the output, confirm correct node/cluster
+./scripts/chaos-engineering.sh kill-node --cluster-id cls-001 --node-id node-2
 ```
 
 ### Layer 2: Strict Mode (`set -euo pipefail`)
